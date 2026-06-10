@@ -159,10 +159,10 @@ unsafe fn hicon_to_png_data_url(
     use image::ImageEncoder;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
+        SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{DrawIconEx, GetDC, ReleaseDC, DI_NORMAL};
+    use windows::Win32::UI::WindowsAndMessaging::{DrawIconEx, DI_NORMAL};
 
     const ICON_SIZE: i32 = 32;
     let screen_dc = GetDC(HWND::default());
@@ -190,8 +190,16 @@ unsafe fn hicon_to_png_data_url(
         ..Default::default()
     };
 
-    let bitmap = CreateDIBSection(memory_dc, &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0);
-    if bitmap.0.is_null() || bits.is_null() {
+    let bitmap = match CreateDIBSection(memory_dc, &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0)
+    {
+        Ok(bitmap) => bitmap,
+        Err(_) => {
+            let _ = DeleteDC(memory_dc);
+            let _ = ReleaseDC(HWND::default(), screen_dc);
+            return None;
+        }
+    };
+    if bits.is_null() {
         let _ = DeleteDC(memory_dc);
         let _ = ReleaseDC(HWND::default(), screen_dc);
         return None;
@@ -201,7 +209,7 @@ unsafe fn hicon_to_png_data_url(
     let draw_ok = DrawIconEx(
         memory_dc, 0, 0, hicon, ICON_SIZE, ICON_SIZE, 0, None, DI_NORMAL,
     )
-    .as_bool();
+    .is_ok();
 
     let output = if draw_ok {
         let bytes_len = (ICON_SIZE * ICON_SIZE * 4) as usize;
