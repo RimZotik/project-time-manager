@@ -8,7 +8,8 @@ pub fn capture_active_window() -> Option<WindowObservation> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
@@ -16,16 +17,12 @@ pub fn capture_active_window() -> Option<WindowObservation> {
 
     unsafe {
         let hwnd: HWND = GetForegroundWindow();
-        if hwnd.0 == 0 {
+        if hwnd.0.is_null() {
             return None;
         }
 
         let mut title_buffer = [0u16; 512];
-        let title_len = GetWindowTextW(
-            hwnd,
-            PWSTR(title_buffer.as_mut_ptr()),
-            title_buffer.len() as i32,
-        );
+        let title_len = GetWindowTextW(hwnd, &mut title_buffer);
         let window_title = String::from_utf16_lossy(&title_buffer[..title_len.max(0) as usize]);
 
         let mut pid = 0u32;
@@ -44,10 +41,15 @@ pub fn capture_active_window() -> Option<WindowObservation> {
 
         let mut buffer = [0u16; 260];
         let mut size = buffer.len() as u32;
-        let ok = QueryFullProcessImageNameW(handle, 0, PWSTR(buffer.as_mut_ptr()), &mut size);
+        let ok = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(buffer.as_mut_ptr()),
+            &mut size,
+        );
         let _ = CloseHandle(handle);
 
-        let process_name = if ok.as_bool() && size > 0 {
+        let process_name = if ok.is_ok() && size > 0 {
             let raw = OsString::from_wide(&buffer[..size as usize]);
             path_file_name(&raw.to_string_lossy())
         } else {
