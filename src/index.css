@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background: #020617;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .field {
+    @apply w-full border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-blue-500;
+  }
+
+  .primary-button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-500;
+  }
+
+  .secondary-button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 border border-slate-700 bg-slate-950 px-4 text-sm font-medium text-slate-100 transition hover:border-slate-500;
+  }
+
+  .icon-button {
+    @apply inline-flex size-10 items-center justify-center border border-slate-700 bg-slate-950 text-slate-100 transition hover:border-slate-500;
+  }
+}
