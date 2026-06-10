@@ -8,7 +8,9 @@ build = "build.rs"
 tauri-build = "2"
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 rust_xlsxwriter = "0.81"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,6 +18,8 @@ tauri = { version = "2" }
 uuid = { version = "1", features = ["v4", "serde"] }
 windows = { version = "0.58", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Gdi",
   "Win32_System_Threading",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging"
 ] }

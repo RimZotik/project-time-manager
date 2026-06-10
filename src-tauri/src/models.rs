@@ -39,6 +39,10 @@ pub struct AppUsageRecord {
     pub key: String,
     pub name: String,
     pub process_name: String,
+    #[serde(default)]
+    pub process_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_data_url: Option<String>,
     pub kind: String,
     pub enabled: bool,
     pub time_seconds: u64,
@@ -67,6 +71,8 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Default)]
 pub struct WindowObservation {
     pub process_name: String,
+    pub process_path: String,
+    pub icon_data_url: Option<String>,
     pub window_title: String,
     pub browser_name: Option<String>,
     pub tab_title: Option<String>,

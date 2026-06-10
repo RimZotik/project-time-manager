@@ -191,8 +191,9 @@ pub fn touch_app_time(
     observation: &WindowObservation,
     seconds: u64,
 ) -> usize {
-    let app_name = display_name_from_process(
+    let app_name = friendly_app_name(
         &observation.process_name,
+        &observation.process_path,
         observation.browser_name.as_deref(),
     );
     let kind = if observation.browser_name.is_some() {
@@ -213,6 +214,8 @@ pub fn touch_app_time(
             key: observation.process_name.clone(),
             name: app_name,
             process_name: observation.process_name.clone(),
+            process_path: observation.process_path.clone(),
+            icon_data_url: observation.icon_data_url.clone(),
             kind,
             enabled: true,
             time_seconds: 0,
@@ -223,8 +226,17 @@ pub fn touch_app_time(
 
     if let Some(app) = project.apps.get_mut(index) {
         app.time_seconds = app.time_seconds.saturating_add(seconds);
-        app.name = display_name_from_process(
+        if !observation.process_path.is_empty()
+            && (app.process_path.is_empty() || app.process_path != observation.process_path)
+        {
+            app.process_path = observation.process_path.clone();
+        }
+        if app.icon_data_url.is_none() {
+            app.icon_data_url = observation.icon_data_url.clone();
+        }
+        app.name = friendly_app_name(
             &observation.process_name,
+            &observation.process_path,
             observation.browser_name.as_deref(),
         );
         app.kind = if observation.browser_name.is_some() {
@@ -277,24 +289,44 @@ pub fn touch_tab_time(
     }
 }
 
-pub fn display_name_from_process(process_name: &str, browser_name: Option<&str>) -> String {
+pub fn friendly_app_name(
+    process_name: &str,
+    _process_path: &str,
+    browser_name: Option<&str>,
+) -> String {
     if let Some(browser) = browser_name {
         return browser.to_string();
     }
 
-    let cleaned = process_name.trim().trim_end_matches(".exe");
-    cleaned
-        .split(['-', '_', '.'])
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let normalized = process_name.trim().trim_end_matches(".exe").to_lowercase();
+    match normalized.as_str() {
+        "afterfx" | "afterfx64" => "Adobe After Effects".to_string(),
+        "premiere pro" | "premierepro" | "prproj" | "adobe premiere pro" => {
+            "Adobe Premiere Pro".to_string()
+        }
+        "code" => "Visual Studio Code".to_string(),
+        "devenv" => "Visual Studio".to_string(),
+        "msedge" | "edge" => "Microsoft Edge".to_string(),
+        "chrome" => "Google Chrome".to_string(),
+        "firefox" => "Mozilla Firefox".to_string(),
+        "explorer" => "File Explorer".to_string(),
+        "notepad" => "Notepad".to_string(),
+        _ => {
+            let cleaned = process_name.trim().trim_end_matches(".exe");
+            cleaned
+                .split(['-', '_', '.'])
+                .filter(|part| !part.is_empty())
+                .map(|part| {
+                    let mut chars = part.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    }
 }
 
 fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
