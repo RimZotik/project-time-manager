@@ -105,6 +105,7 @@ fn icon_data_url(process_path: &str) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use std::sync::{Mutex, OnceLock};
     use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
 
@@ -129,7 +130,7 @@ fn icon_data_url(process_path: &str) -> Option<String> {
         let mut file_info = SHFILEINFOW::default();
         let result = SHGetFileInfoW(
             PCWSTR(wide_path.as_ptr()),
-            0,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
             Some(&mut file_info),
             std::mem::size_of::<SHFILEINFOW>() as u32,
             SHGFI_ICON | SHGFI_LARGEICON,
