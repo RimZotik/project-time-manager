@@ -1,4 +1,4 @@
-use crate::models::{AppUsageRecord, ProjectRecord, ProjectStageRecord, TabUsageRecord};
+use crate::models::{AppUsageRecord, ProjectRecord, TabUsageRecord};
 use printpdf::{Base64OrRaw, GeneratePdfOptions, PdfDocument, PdfSaveOptions, PdfWarnMsg};
 use std::collections::BTreeMap;
 use std::fs;
@@ -484,7 +484,7 @@ fn simple_table(headers: &[(&str, &str)], rows: &[Vec<String>]) -> String {
         })
         .collect::<String>();
 
-    format!("<table><thead><tr>{header_cells}</tr></thead><tbody>{body}</tbody></table>")
+    format!("<table><tbody><tr>{header_cells}</tr>{body}</tbody></table>")
 }
 
 fn empty_html() -> String {
@@ -530,13 +530,12 @@ struct IncludedTab {
 
 #[derive(Clone)]
 struct IncludedStage {
+    id: String,
     name: String,
-    created_at: String,
-    updated_at: String,
     seconds: u64,
-    app_count: usize,
-    tab_count: usize,
-    apps: String,
+    session_count: usize,
+    first_used_at: String,
+    last_used_at: String,
 }
 
 fn included_apps(project: &ProjectRecord) -> Vec<IncludedApp> {
@@ -604,39 +603,51 @@ fn included_app_seconds(app: &AppUsageRecord) -> u64 {
 }
 
 fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
-    let mut stages = project
-        .stages
+    let mut stages = Vec::<IncludedStage>::new();
+
+    for session in project
+        .sessions
         .iter()
-        .map(|stage| {
-            let seconds = project
-                .apps
-                .iter()
-                .map(|app| included_stage_app_seconds(stage, app))
-                .sum();
-            let app_names = project
-                .apps
-                .iter()
-                .filter(|app| stage_app_enabled(stage, app))
-                .map(|app| app.name.clone())
-                .collect::<Vec<_>>();
-            let app_count = app_names.len();
-            let tab_count = project
-                .apps
-                .iter()
-                .filter(|app| stage_app_enabled(stage, app))
-                .flat_map(|app| app.tabs.iter().filter(|tab| stage_tab_enabled(stage, app, tab)))
-                .count();
-            IncludedStage {
-                name: stage.name.clone(),
-                created_at: stage.created_at.clone(),
-                updated_at: stage.updated_at.clone(),
-                seconds,
-                app_count,
-                tab_count,
-                apps: app_names.join(", "),
+        .filter(|session| !session.stages.is_empty() && session.duration_seconds > 0)
+    {
+        let last_used_at = session
+            .stopped_at
+            .as_deref()
+            .unwrap_or(session.started_at.as_str())
+            .to_string();
+        for snapshot in &session.stages {
+            if let Some(stage) = stages.iter_mut().find(|item| item.id == snapshot.id) {
+                stage.seconds = stage.seconds.saturating_add(session.duration_seconds);
+                stage.session_count += 1;
+                if stage.first_used_at.is_empty() || session.started_at < stage.first_used_at {
+                    stage.first_used_at = session.started_at.clone();
+                }
+                if stage.last_used_at.is_empty() || last_used_at > stage.last_used_at {
+                    stage.last_used_at = last_used_at.clone();
+                }
+                if let Some(current_stage) = project.stages.iter().find(|item| item.id == snapshot.id) {
+                    stage.name = current_stage.name.clone();
+                }
+                continue;
             }
-        })
-        .collect::<Vec<_>>();
+
+            let stage_name = project
+                .stages
+                .iter()
+                .find(|item| item.id == snapshot.id)
+                .map(|item| item.name.clone())
+                .unwrap_or_else(|| snapshot.name.clone());
+            stages.push(IncludedStage {
+                id: snapshot.id.clone(),
+                name: stage_name,
+                seconds: session.duration_seconds,
+                session_count: 1,
+                first_used_at: session.started_at.clone(),
+                last_used_at: last_used_at.clone(),
+            });
+        }
+    }
+
     stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
     stages
 }
@@ -655,25 +666,21 @@ fn stage_pages(stages: &[IncludedStage]) -> Vec<String> {
                 &format!("Этапы{suffix}"),
                 &simple_table(
                     &[
-                        ("Название", "20%"),
-                        ("Создан", "16%"),
-                        ("Обновлен", "16%"),
-                        ("Время", "14%"),
-                        ("Приложений", "12%"),
-                        ("Вкладок", "12%"),
-                        ("Приложения", "10%"),
+                        ("Название", "28%"),
+                        ("Сеансов", "12%"),
+                        ("Время", "16%"),
+                        ("Первое использование", "22%"),
+                        ("Последнее использование", "22%"),
                     ],
                     &chunk
                         .iter()
                         .map(|stage| {
                             vec![
                                 escape_html(&stage.name),
-                                escape_html(&stage.created_at),
-                                escape_html(&stage.updated_at),
+                                stage.session_count.to_string(),
                                 format_duration(stage.seconds),
-                                stage.app_count.to_string(),
-                                stage.tab_count.to_string(),
-                                escape_html(&stage.apps),
+                                escape_html(&stage.first_used_at),
+                                escape_html(&stage.last_used_at),
                             ]
                         })
                         .collect::<Vec<_>>(),
@@ -681,46 +688,6 @@ fn stage_pages(stages: &[IncludedStage]) -> Vec<String> {
             )
         })
         .collect()
-}
-
-fn stage_app_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord) -> bool {
-    if !app.enabled {
-        return false;
-    }
-    stage
-        .apps
-        .iter()
-        .find(|item| item.app_key == app.key)
-        .map(|item| item.enabled)
-        .unwrap_or(true)
-}
-
-fn stage_tab_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord, tab: &TabUsageRecord) -> bool {
-    if !stage_app_enabled(stage, app) || !tab.enabled {
-        return false;
-    }
-    stage
-        .apps
-        .iter()
-        .find(|item| item.app_key == app.key)
-        .and_then(|item| item.tabs.iter().find(|tab_state| tab_state.tab_key == tab.key))
-        .map(|item| item.enabled)
-        .unwrap_or(true)
-}
-
-fn included_stage_app_seconds(stage: &ProjectStageRecord, app: &AppUsageRecord) -> u64 {
-    if !stage_app_enabled(stage, app) {
-        return 0;
-    }
-    if app.kind == "browser" {
-        app.tabs
-            .iter()
-            .filter(|tab| stage_tab_enabled(stage, app, tab))
-            .map(included_tab_seconds)
-            .sum()
-    } else {
-        app.time_seconds
-    }
 }
 
 fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {

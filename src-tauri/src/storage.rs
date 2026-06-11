@@ -293,6 +293,7 @@ pub fn create_project(
         updated_at: now_iso(),
         sessions: Vec::new(),
         apps: Vec::new(),
+        selected_stage_ids: Vec::new(),
         stages: Vec::new(),
     };
     normalize_project_structure(&mut project);
@@ -585,6 +586,23 @@ pub fn create_stage(paths: &StoragePaths, project_id: &str, name: &str) -> Resul
     Ok(project)
 }
 
+pub fn set_selected_stages(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_ids: &[String],
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    project.selected_stage_ids = stage_ids
+        .iter()
+        .filter(|stage_id| project.stages.iter().any(|stage| stage.id == stage_id.as_str()))
+        .cloned()
+        .collect();
+    project.updated_at = now_iso();
+    normalize_project_structure(&mut project);
+    save_project(paths, &project)?;
+    Ok(project)
+}
+
 pub fn rename_stage(
     paths: &StoragePaths,
     project_id: &str,
@@ -613,6 +631,7 @@ pub fn delete_stage(
 ) -> Result<ProjectRecord, String> {
     let mut project = load_project(paths, project_id)?;
     project.stages.retain(|stage| stage.id != stage_id);
+    project.selected_stage_ids.retain(|item| item != stage_id);
     for (index, stage) in project.stages.iter_mut().enumerate() {
         stage.order = index;
         stage.updated_at = now_iso();
@@ -759,6 +778,10 @@ pub fn normalize_project_structure(project: &mut ProjectRecord) {
     project
         .stages
         .sort_by(|left, right| left.order.cmp(&right.order).then(left.created_at.cmp(&right.created_at)));
+    project
+        .selected_stage_ids
+        .retain(|stage_id| project.stages.iter().any(|stage| stage.id == stage_id.as_str()));
+    project.selected_stage_ids.dedup();
     let project_apps = project.apps.clone();
     for (index, stage) in project.stages.iter_mut().enumerate() {
         stage.order = index;

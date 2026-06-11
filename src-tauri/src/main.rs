@@ -29,6 +29,7 @@ struct TrackerDraft {
     duration_seconds: u64,
     app_hits: u64,
     browser_hits: u64,
+    stages: Vec<SessionStageSnapshot>,
 }
 
 struct TrackerRuntime {
@@ -98,6 +99,20 @@ fn start_tracking(state: State<'_, AppRuntime>) -> Result<(), String> {
         .selected_project_id
         .clone()
         .ok_or_else(|| "No project selected".to_string())?;
+    let project = store
+        .projects
+        .iter()
+        .find(|item| item.id == project_id)
+        .ok_or_else(|| "Project not found".to_string())?;
+    let selected_stages = project
+        .stages
+        .iter()
+        .filter(|stage| project.selected_stage_ids.iter().any(|stage_id| stage_id == &stage.id))
+        .map(|stage| SessionStageSnapshot {
+            id: stage.id.clone(),
+            name: stage.name.clone(),
+        })
+        .collect::<Vec<_>>();
 
     if tracker.status == "running" {
         return Ok(());
@@ -114,6 +129,7 @@ fn start_tracking(state: State<'_, AppRuntime>) -> Result<(), String> {
             duration_seconds: 0,
             app_hits: 0,
             browser_hits: 0,
+            stages: selected_stages,
         });
     }
     Ok(())
@@ -207,6 +223,7 @@ fn create_stage(
     project_id: String,
     name: String,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::create_stage(&state.paths, &project_id, &name)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -219,6 +236,7 @@ fn rename_stage(
     stage_id: String,
     name: String,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::rename_stage(&state.paths, &project_id, &stage_id, &name)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -230,6 +248,7 @@ fn delete_stage(
     project_id: String,
     stage_id: String,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::delete_stage(&state.paths, &project_id, &stage_id)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -242,7 +261,20 @@ fn reorder_stage(
     stage_id: String,
     direction: i32,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::reorder_stage(&state.paths, &project_id, &stage_id, direction)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn set_selected_project_stages(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_ids: Vec<String>,
+) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
+    let updated = crate::storage::set_selected_stages(&state.paths, &project_id, &stage_ids)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
 }
@@ -295,7 +327,7 @@ fn rename_project(
     project_id: String,
     name: String,
 ) -> Result<ProjectRecord, String> {
-    ensure_tracker_idle(&state)?;
+    ensure_tracker_stopped(&state)?;
     let updated = rename_project_record(&state.paths, &project_id, &name)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -303,7 +335,7 @@ fn rename_project(
 
 #[tauri::command]
 fn delete_project(state: State<'_, AppRuntime>, project_id: String) -> Result<(), String> {
-    ensure_tracker_idle(&state)?;
+    ensure_tracker_stopped(&state)?;
     delete_project_record(&state.paths, &project_id)?;
     let mut store = state.store.lock().map_err(|err| err.to_string())?;
     store.projects.retain(|project| project.id != project_id);
@@ -354,7 +386,7 @@ fn import_project_json(
     state: State<'_, AppRuntime>,
     json_text: String,
 ) -> Result<ProjectSummary, String> {
-    ensure_tracker_idle(&state)?;
+    ensure_tracker_stopped(&state)?;
     let project = import_project_from_json(&state.paths, &json_text)?;
     sync_project_in_store(&state, project.clone())?;
     {
@@ -367,7 +399,7 @@ fn import_project_json(
 
 #[tauri::command]
 fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportResult, String> {
-    ensure_tracker_idle(&state)?;
+    ensure_tracker_stopped(&state)?;
     let store = state.store.lock().map_err(|err| err.to_string())?.clone();
     let project =
         selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
@@ -381,7 +413,7 @@ fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportRe
 
 #[tauri::command]
 fn export_selected_project_pdf(state: State<'_, AppRuntime>) -> Result<ExportResult, String> {
-    ensure_tracker_idle(&state)?;
+    ensure_tracker_stopped(&state)?;
     let store = state.store.lock().map_err(|err| err.to_string())?.clone();
     let project =
         selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
@@ -439,12 +471,12 @@ fn sync_project_in_store(
     Ok(())
 }
 
-fn ensure_tracker_idle(state: &State<'_, AppRuntime>) -> Result<(), String> {
+fn ensure_tracker_stopped(state: &State<'_, AppRuntime>) -> Result<(), String> {
     let tracker = state.tracker.lock().map_err(|err| err.to_string())?;
-    if tracker.status == "running" {
-        Err("Остановите или поставьте запись на паузу.".to_string())
-    } else {
+    if tracker.status == "stopped" {
         Ok(())
+    } else {
+        Err("Изменять этапы можно только при остановленной записи.".to_string())
     }
 }
 
@@ -550,6 +582,7 @@ fn finalize_session(state: &State<'_, AppRuntime>) -> Result<(), String> {
         duration_seconds: draft.duration_seconds,
         app_count: draft.app_hits as usize,
         browser_count: draft.browser_hits as usize,
+        stages: draft.stages,
     });
     project.updated_at = now_iso();
     save_project(&state.paths, project)?;
@@ -665,6 +698,7 @@ fn main() {
             rename_stage,
             delete_stage,
             reorder_stage,
+            set_selected_project_stages,
             toggle_stage_app_included,
             toggle_stage_tab_included,
             toggle_stage_url_included,

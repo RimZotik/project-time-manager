@@ -1,4 +1,4 @@
-use crate::models::{AppUsageRecord, ProjectRecord, ProjectStageRecord, TabUsageRecord};
+use crate::models::{AppUsageRecord, ProjectRecord, SessionRecord, TabUsageRecord};
 use rust_xlsxwriter::{
     Chart, ChartType, Color, Format, FormatAlign, FormatBorder, Workbook, XlsxError,
 };
@@ -14,12 +14,12 @@ pub fn export_project_xlsx(
     let tabs = included_tabs(project);
     let stages = included_stages(project);
 
-    write_report_sheet(&mut workbook, project, &apps, &tabs, &stages, &styles)?;
+    write_report_sheet(&mut workbook, project, &apps, &tabs, &styles)?;
     write_apps_sheet(&mut workbook, &apps, &styles)?;
     write_tabs_sheet(&mut workbook, &tabs, &styles)?;
     write_sessions_sheet(&mut workbook, project, &styles)?;
     if !stages.is_empty() {
-        write_stages_sheet(&mut workbook, &stages, &styles)?;
+        write_stages_sheet(&mut workbook, project, &stages, &styles)?;
     }
 
     workbook.save(&output_path).map_err(format_xlsx_error)?;
@@ -57,12 +57,12 @@ struct IncludedTab {
 
 #[derive(Clone)]
 struct IncludedStage {
+    id: String,
     name: String,
-    created_at: String,
-    updated_at: String,
     seconds: u64,
-    app_count: usize,
-    tab_count: usize,
+    session_count: usize,
+    first_used_at: String,
+    last_used_at: String,
 }
 
 impl ReportStyles {
@@ -117,95 +117,35 @@ fn write_report_sheet(
     project: &ProjectRecord,
     apps: &[IncludedApp],
     tabs: &[IncludedTab],
-    stages: &[IncludedStage],
     styles: &ReportStyles,
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
     worksheet.set_name("Отчет").map_err(format_xlsx_error)?;
     worksheet.set_tab_color(Color::RGB(0x059669));
-    worksheet
-        .set_column_width(0, 22)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(1, 18)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(2, 18)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(3, 18)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(4, 22)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(5, 16)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(6, 16)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(8, 3)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(9, 24)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(10, 12)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(12, 24)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(13, 12)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(15, 24)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(16, 12)
-        .map_err(format_xlsx_error)?;
+    worksheet.set_column_width(0, 22).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(1, 18).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(2, 18).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(3, 18).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(4, 22).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(5, 16).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(6, 16).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(9, 24).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(10, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(12, 24).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(13, 12).map_err(format_xlsx_error)?;
 
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
 
     worksheet
-        .merge_range(
-            0,
-            0,
-            0,
-            6,
-            &format!("Отчет по проекту: {}", project.name),
-            &styles.title,
-        )
+        .merge_range(0, 0, 0, 6, &format!("Отчет по проекту: {}", project.name), &styles.title)
         .map_err(format_xlsx_error)?;
     worksheet
-        .merge_range(
-            1,
-            0,
-            1,
-            6,
-            "Учитываются только включенные приложения и вкладки.",
-            &styles.subtitle,
-        )
+        .merge_range(1, 0, 1, 6, "Учитываются только включенные приложения и вкладки.", &styles.subtitle)
         .map_err(format_xlsx_error)?;
 
-    write_metric_text(
-        worksheet,
-        3,
-        0,
-        "Всего времени",
-        &format_duration(total_seconds),
-        styles,
-    )?;
+    write_metric_text(worksheet, 3, 0, "Всего времени", &format_duration(total_seconds), styles)?;
     write_metric(worksheet, 3, 2, "Приложений", apps.len() as f64, styles)?;
-    write_metric(
-        worksheet,
-        3,
-        4,
-        "Сеансов",
-        project.sessions.len() as f64,
-        styles,
-    )?;
+    write_metric(worksheet, 3, 4, "Сеансов", project.sessions.len() as f64, styles)?;
 
     worksheet
         .merge_range(6, 0, 6, 2, "Топ приложений", &styles.section)
@@ -214,99 +154,56 @@ fn write_report_sheet(
         .merge_range(6, 4, 6, 6, "Топ вкладок", &styles.section)
         .map_err(format_xlsx_error)?;
 
-    write_small_table_header(
-        worksheet,
-        7,
-        0,
-        &["Приложение", "Длительность", "%"],
-        styles,
-    )?;
+    write_small_table_header(worksheet, 7, 0, &["Приложение", "Длительность", "%"], styles)?;
     write_small_table_header(worksheet, 7, 4, &["Вкладка", "Длительность", "%"], styles)?;
 
     for (index, app) in apps.iter().take(8).enumerate() {
         let row = 8 + index as u32;
-        worksheet
-            .write_string_with_format(row, 0, &app.name, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 1, &format_duration(app.seconds), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 2, ratio(app.seconds, total_seconds), &styles.percent)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number(row, 7, seconds_to_hours(app.seconds))
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 9, &app.name, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 10, seconds_to_hours(app.seconds), &styles.number)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 0, &app.name, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 1, &format_duration(app.seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 2, ratio(app.seconds, total_seconds), &styles.percent).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 9, &app.name, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 10, seconds_to_hours(app.seconds), &styles.number).map_err(format_xlsx_error)?;
     }
 
     for (index, tab) in tabs.iter().take(8).enumerate() {
         let row = 8 + index as u32;
-        worksheet
-            .write_string_with_format(row, 4, &tab.title, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 5, &format_duration(tab.seconds), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 6, ratio(tab.seconds, total_seconds), &styles.percent)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number(row, 8, seconds_to_hours(tab.seconds))
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 12, &tab.title, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 13, seconds_to_hours(tab.seconds), &styles.number)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 4, &tab.title, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 5, &format_duration(tab.seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 6, ratio(tab.seconds, total_seconds), &styles.percent).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 12, &tab.title, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 13, seconds_to_hours(tab.seconds), &styles.number).map_err(format_xlsx_error)?;
     }
 
-    worksheet
-        .write_string_with_format(7, 9, "Данные графика приложений", &styles.header)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .write_string_with_format(7, 10, "Часы", &styles.header)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .write_string_with_format(7, 12, "Данные графика доменов", &styles.header)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .write_string_with_format(7, 13, "Часы", &styles.header)
-        .map_err(format_xlsx_error)?;
-    if !stages.is_empty() {
-        worksheet
-            .write_string_with_format(7, 15, "Этапы", &styles.header)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(7, 16, "Часы", &styles.header)
-            .map_err(format_xlsx_error)?;
-        for (index, stage) in stages.iter().take(8).enumerate() {
-            let row = 8 + index as u32;
-            worksheet
-                .write_string_with_format(row, 15, &stage.name, &styles.text)
-                .map_err(format_xlsx_error)?;
-            worksheet
-                .write_number_with_format(row, 16, seconds_to_hours(stage.seconds), &styles.number)
-                .map_err(format_xlsx_error)?;
-        }
-        let last_row = 8 + stages.len().min(8) as u32 - 1;
+    worksheet.write_string_with_format(7, 9, "Данные графика приложений", &styles.header).map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(7, 10, "Часы", &styles.header).map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(7, 12, "Данные графика доменов", &styles.header).map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(7, 13, "Часы", &styles.header).map_err(format_xlsx_error)?;
+
+    if !apps.is_empty() {
+        let last_row = 8 + apps.len().min(8) as u32 - 1;
         let mut chart = Chart::new(ChartType::Bar);
-        chart.title().set_name("Этапы проекта");
+        chart.title().set_name("Приложения проекта");
         chart.set_style(10);
         chart
             .add_series()
-            .set_name("Этапы")
-            .set_categories(("Отчет", 8, 15, last_row, 15))
-            .set_values(("Отчет", 8, 16, last_row, 16));
-        worksheet
-            .insert_chart(20, 8, &chart)
-            .map_err(format_xlsx_error)?;
+            .set_name("Приложения")
+            .set_categories(("Отчет", 8, 9, last_row, 9))
+            .set_values(("Отчет", 8, 10, last_row, 10));
+        worksheet.insert_chart(20, 0, &chart).map_err(format_xlsx_error)?;
+    }
+
+    if !tabs.is_empty() {
+        let last_row = 8 + tabs.len().min(8) as u32 - 1;
+        let mut chart = Chart::new(ChartType::Bar);
+        chart.title().set_name("Домены проекта");
+        chart.set_style(10);
+        chart
+            .add_series()
+            .set_name("Домены")
+            .set_categories(("Отчет", 8, 12, last_row, 12))
+            .set_values(("Отчет", 8, 13, last_row, 13));
+        worksheet.insert_chart(20, 8, &chart).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -318,58 +215,25 @@ fn write_apps_sheet(
     styles: &ReportStyles,
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name("Приложения")
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(0, 32)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(1, 24)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(2, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(3, 12)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(4, 12)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(5, 12)
-        .map_err(format_xlsx_error)?;
+    worksheet.set_name("Приложения").map_err(format_xlsx_error)?;
+    worksheet.set_column_width(0, 32).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(1, 24).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(2, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(3, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(4, 12).map_err(format_xlsx_error)?;
 
-    write_small_table_header(
-        worksheet,
-        0,
-        0,
-        &["Название", "Процесс", "Тип", "Длительность", "Часы"],
-        styles,
-    )?;
+    write_small_table_header(worksheet, 0, 0, &["Название", "Процесс", "Тип", "Длительность", "Часы"], styles)?;
     for (index, app) in apps.iter().enumerate() {
         let row = (index + 1) as u32;
-        worksheet
-            .write_string_with_format(row, 0, &app.name, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 1, &app.process_name, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 2, app_kind_label(&app.kind), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 3, &format_duration(app.seconds), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 4, seconds_to_hours(app.seconds), &styles.number)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 0, &app.name, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 1, &app.process_name, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 2, app_kind_label(&app.kind), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 3, &format_duration(app.seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 4, seconds_to_hours(app.seconds), &styles.number).map_err(format_xlsx_error)?;
     }
 
     if !apps.is_empty() {
-        worksheet
-            .autofilter(0, 0, apps.len() as u32, 4)
-            .map_err(format_xlsx_error)?;
+        worksheet.autofilter(0, 0, apps.len() as u32, 4).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -382,68 +246,37 @@ fn write_tabs_sheet(
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
     worksheet.set_name("Вкладки").map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(0, 22)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(1, 42)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(2, 48)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(3, 12)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(4, 12)
-        .map_err(format_xlsx_error)?;
+    worksheet.set_column_width(0, 22).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(1, 42).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(2, 48).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(3, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(4, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(5, 12).map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &[
-            "Браузер",
-            "Домен",
-            "Основной URL",
-            "Ссылок",
-            "Длительность",
-            "Часы",
-        ],
+        &["Браузер", "Домен", "Основной URL", "Ссылок", "Длительность", "Часы"],
         styles,
     )?;
+
     for (index, tab) in tabs.iter().enumerate() {
         let row = (index + 1) as u32;
-        worksheet
-            .write_string_with_format(row, 0, &tab.browser, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 1, &tab.title, &styles.text)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 0, &tab.browser, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 1, &tab.title, &styles.text).map_err(format_xlsx_error)?;
         if let Some(url) = tab.url.as_deref().filter(|url| !url.trim().is_empty()) {
-            worksheet
-                .write_url_with_text(row, 2, url, url)
-                .map_err(format_xlsx_error)?;
+            worksheet.write_url_with_text(row, 2, url, url).map_err(format_xlsx_error)?;
         } else {
-            worksheet
-                .write_string_with_format(row, 2, "", &styles.text)
-                .map_err(format_xlsx_error)?;
+            worksheet.write_string_with_format(row, 2, "", &styles.text).map_err(format_xlsx_error)?;
         }
-        worksheet
-            .write_number_with_format(row, 3, tab.url_count as f64, &styles.number)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 4, &format_duration(tab.seconds), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 5, seconds_to_hours(tab.seconds), &styles.number)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 3, tab.url_count as f64, &styles.number).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 4, &format_duration(tab.seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 5, seconds_to_hours(tab.seconds), &styles.number).map_err(format_xlsx_error)?;
     }
 
     if !tabs.is_empty() {
-        worksheet
-            .autofilter(0, 0, tabs.len() as u32, 5)
-            .map_err(format_xlsx_error)?;
+        worksheet.autofilter(0, 0, tabs.len() as u32, 5).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -456,81 +289,45 @@ fn write_sessions_sheet(
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
     worksheet.set_name("Сеансы").map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(0, 28)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(1, 28)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(2, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(3, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(4, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(5, 14)
-        .map_err(format_xlsx_error)?;
+    worksheet.set_column_width(0, 28).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(1, 28).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(2, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(3, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(4, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(5, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(6, 28).map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &[
-            "Начало",
-            "Окончание",
-            "Длительность",
-            "Часы",
-            "Приложения",
-            "Браузер",
-        ],
+        &["Начало", "Окончание", "Длительность", "Часы", "Приложения", "Браузер", "Этапы"],
         styles,
     )?;
 
     for (index, session) in project.sessions.iter().enumerate() {
         let row = (index + 1) as u32;
-        worksheet
-            .write_string_with_format(row, 0, &session.started_at, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(
-                row,
-                1,
-                session.stopped_at.as_deref().unwrap_or(""),
-                &styles.text,
-            )
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(
-                row,
-                2,
-                &format_duration(session.duration_seconds),
-                &styles.text,
-            )
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(
-                row,
-                3,
-                seconds_to_hours(session.duration_seconds),
-                &styles.number,
-            )
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 4, session.app_count as f64, &styles.number)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 5, session.browser_count as f64, &styles.number)
-            .map_err(format_xlsx_error)?;
+        let stage_names = if session.stages.is_empty() {
+            String::new()
+        } else {
+            session
+                .stages
+                .iter()
+                .map(|stage| stage.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        worksheet.write_string_with_format(row, 0, &session.started_at, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 1, session.stopped_at.as_deref().unwrap_or(""), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 2, &format_duration(session.duration_seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 3, seconds_to_hours(session.duration_seconds), &styles.number).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 4, session.app_count as f64, &styles.number).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 5, session.browser_count as f64, &styles.number).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 6, &stage_names, &styles.text).map_err(format_xlsx_error)?;
     }
 
     if !project.sessions.is_empty() {
-        worksheet
-            .autofilter(0, 0, project.sessions.len() as u32, 5)
-            .map_err(format_xlsx_error)?;
+        worksheet.autofilter(0, 0, project.sessions.len() as u32, 6).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -538,64 +335,72 @@ fn write_sessions_sheet(
 
 fn write_stages_sheet(
     workbook: &mut Workbook,
+    project: &ProjectRecord,
     stages: &[IncludedStage],
     styles: &ReportStyles,
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
     worksheet.set_name("Этапы").map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(0, 24)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(1, 20)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(2, 20)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(3, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(4, 14)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .set_column_width(5, 14)
-        .map_err(format_xlsx_error)?;
+    worksheet.set_column_width(0, 24).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(1, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(2, 14).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(3, 22).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(4, 22).map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &["Название", "Создан", "Обновлен", "Время", "Приложений", "Вкладок"],
+        &["Название", "Сеансов", "Время", "Первое использование", "Последнее использование"],
         styles,
     )?;
 
     for (index, stage) in stages.iter().enumerate() {
         let row = (index + 1) as u32;
-        worksheet
-            .write_string_with_format(row, 0, &stage.name, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 1, &stage.created_at, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 2, &stage.updated_at, &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_string_with_format(row, 3, &format_duration(stage.seconds), &styles.text)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 4, stage.app_count as f64, &styles.number)
-            .map_err(format_xlsx_error)?;
-        worksheet
-            .write_number_with_format(row, 5, stage.tab_count as f64, &styles.number)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 0, &stage.name, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_number_with_format(row, 1, stage.session_count as f64, &styles.number).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 2, &format_duration(stage.seconds), &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 3, &stage.first_used_at, &styles.text).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, 4, &stage.last_used_at, &styles.text).map_err(format_xlsx_error)?;
     }
 
     if !stages.is_empty() {
-        worksheet
-            .autofilter(0, 0, stages.len() as u32, 5)
-            .map_err(format_xlsx_error)?;
+        worksheet.autofilter(0, 0, stages.len() as u32, 4).map_err(format_xlsx_error)?;
+    }
+
+    let timeline_sessions = stage_sessions(project);
+    if !timeline_sessions.is_empty() {
+        let header_row = stages.len() as u32 + 4;
+        worksheet.write_string_with_format(header_row, 0, "Сессия", &styles.header).map_err(format_xlsx_error)?;
+        for (index, stage) in stages.iter().enumerate() {
+            worksheet.write_string_with_format(header_row, (index + 1) as u16, &stage.name, &styles.header).map_err(format_xlsx_error)?;
+        }
+
+        for (session_index, session) in timeline_sessions.iter().enumerate() {
+            let row = header_row + 1 + session_index as u32;
+            worksheet.write_string_with_format(row, 0, &session_label(session), &styles.text).map_err(format_xlsx_error)?;
+            for (stage_index, stage) in stages.iter().enumerate() {
+                let value = if session.stages.iter().any(|item| item.id == stage.id) {
+                    seconds_to_hours(session.duration_seconds)
+                } else {
+                    0.0
+                };
+                worksheet.write_number_with_format(row, (stage_index + 1) as u16, value, &styles.number).map_err(format_xlsx_error)?;
+            }
+        }
+
+        let last_row = header_row + timeline_sessions.len() as u32;
+        let mut chart = Chart::new(ChartType::Column);
+        chart.title().set_name("Этапы по сессиям");
+        chart.set_style(10);
+        for (stage_index, stage) in stages.iter().enumerate() {
+            chart
+                .add_series()
+                .set_name(stage.name.as_str())
+                .set_categories(("Этапы", header_row + 1, 0, last_row, 0))
+                .set_values(("Этапы", header_row + 1, (stage_index + 1) as u16, last_row, (stage_index + 1) as u16));
+        }
+        worksheet.insert_chart(last_row + 3, 0, &chart).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -609,12 +414,8 @@ fn write_metric(
     value: f64,
     styles: &ReportStyles,
 ) -> Result<(), String> {
-    worksheet
-        .write_string_with_format(row, col, label, &styles.metric_label)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .write_number_with_format(row + 1, col, value, &styles.metric_value)
-        .map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(row, col, label, &styles.metric_label).map_err(format_xlsx_error)?;
+    worksheet.write_number_with_format(row + 1, col, value, &styles.metric_value).map_err(format_xlsx_error)?;
     Ok(())
 }
 
@@ -626,12 +427,8 @@ fn write_metric_text(
     value: &str,
     styles: &ReportStyles,
 ) -> Result<(), String> {
-    worksheet
-        .write_string_with_format(row, col, label, &styles.metric_label)
-        .map_err(format_xlsx_error)?;
-    worksheet
-        .write_string_with_format(row + 1, col, value, &styles.metric_value)
-        .map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(row, col, label, &styles.metric_label).map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(row + 1, col, value, &styles.metric_value).map_err(format_xlsx_error)?;
     Ok(())
 }
 
@@ -643,9 +440,7 @@ fn write_small_table_header(
     styles: &ReportStyles,
 ) -> Result<(), String> {
     for (offset, label) in labels.iter().enumerate() {
-        worksheet
-            .write_string_with_format(row, start_col + offset as u16, *label, &styles.header)
-            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(row, start_col + offset as u16, *label, &styles.header).map_err(format_xlsx_error)?;
     }
     Ok(())
 }
@@ -686,11 +481,7 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
                     browser: app.name.clone(),
                     title: tab.title.clone(),
                     url: tab.url.clone(),
-                    url_count: if tab.urls.is_empty() {
-                        usize::from(tab.url.is_some())
-                    } else {
-                        tab.urls.len()
-                    },
+                    url_count: if tab.urls.is_empty() { usize::from(tab.url.is_some()) } else { tab.urls.len() },
                     seconds,
                 })
             })
@@ -701,38 +492,52 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
 }
 
 fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
-    let mut stages = project
-        .stages
-        .iter()
-        .map(|stage| {
-            let seconds = project
-                .apps
-                .iter()
-                .map(|app| included_stage_app_seconds(stage, app))
-                .sum();
-            let app_count = project
-                .apps
-                .iter()
-                .filter(|app| stage_app_enabled(stage, app))
-                .count();
-            let tab_count = project
-                .apps
-                .iter()
-                .filter(|app| stage_app_enabled(stage, app))
-                .flat_map(|app| app.tabs.iter().filter(|tab| stage_tab_enabled(stage, app, tab)))
-                .count();
-            IncludedStage {
-                name: stage.name.clone(),
-                created_at: stage.created_at.clone(),
-                updated_at: stage.updated_at.clone(),
-                seconds,
-                app_count,
-                tab_count,
+    let mut stages = Vec::<IncludedStage>::new();
+
+    for session in stage_sessions(project) {
+        let last_used_at = session.stopped_at.as_deref().unwrap_or(session.started_at.as_str()).to_string();
+        for snapshot in &session.stages {
+            if let Some(stage) = stages.iter_mut().find(|item| item.id == snapshot.id) {
+                stage.seconds = stage.seconds.saturating_add(session.duration_seconds);
+                stage.session_count += 1;
+                if stage.first_used_at.is_empty() || session.started_at < stage.first_used_at {
+                    stage.first_used_at = session.started_at.clone();
+                }
+                if stage.last_used_at.is_empty() || last_used_at > stage.last_used_at {
+                    stage.last_used_at = last_used_at.clone();
+                }
+                if let Some(current_stage) = project.stages.iter().find(|item| item.id == snapshot.id) {
+                    stage.name = current_stage.name.clone();
+                }
+            } else {
+                let stage_name = project
+                    .stages
+                    .iter()
+                    .find(|item| item.id == snapshot.id)
+                    .map(|item| item.name.clone())
+                    .unwrap_or_else(|| snapshot.name.clone());
+                stages.push(IncludedStage {
+                    id: snapshot.id.clone(),
+                    name: stage_name,
+                    seconds: session.duration_seconds,
+                    session_count: 1,
+                    first_used_at: session.started_at.clone(),
+                    last_used_at: last_used_at.clone(),
+                });
             }
-        })
-        .collect::<Vec<_>>();
+        }
+    }
+
     stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
     stages
+}
+
+fn stage_sessions(project: &ProjectRecord) -> Vec<&SessionRecord> {
+    project
+        .sessions
+        .iter()
+        .filter(|session| !session.stages.is_empty() && session.duration_seconds > 0)
+        .collect::<Vec<_>>()
 }
 
 fn included_app_seconds(app: &AppUsageRecord) -> u64 {
@@ -740,66 +545,16 @@ fn included_app_seconds(app: &AppUsageRecord) -> u64 {
         return 0;
     }
     if app.kind == "browser" && !app.tabs.is_empty() {
-        return app
-            .tabs
-            .iter()
-            .filter(|tab| tab.enabled)
-            .map(included_tab_seconds)
-            .sum();
+        return app.tabs.iter().filter(|tab| tab.enabled).map(included_tab_seconds).sum();
     }
     app.time_seconds
-}
-
-fn stage_app_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord) -> bool {
-    if !app.enabled {
-        return false;
-    }
-    stage
-        .apps
-        .iter()
-        .find(|item| item.app_key == app.key)
-        .map(|item| item.enabled)
-        .unwrap_or(true)
-}
-
-fn stage_tab_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord, tab: &TabUsageRecord) -> bool {
-    if !stage_app_enabled(stage, app) || !tab.enabled {
-        return false;
-    }
-    stage
-        .apps
-        .iter()
-        .find(|item| item.app_key == app.key)
-        .and_then(|item| item.tabs.iter().find(|item| item.tab_key == tab.key))
-        .map(|item| item.enabled)
-        .unwrap_or(true)
-}
-
-fn included_stage_app_seconds(stage: &ProjectStageRecord, app: &AppUsageRecord) -> u64 {
-    if !stage_app_enabled(stage, app) {
-        return 0;
-    }
-    if app.kind == "browser" {
-        app.tabs
-            .iter()
-            .filter(|tab| stage_tab_enabled(stage, app, tab))
-            .map(included_tab_seconds)
-            .sum()
-    } else {
-        app.time_seconds
-    }
 }
 
 fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {
     if tab.urls.is_empty() {
         return tab.time_seconds;
     }
-    tab
-        .urls
-        .iter()
-        .filter(|item| item.enabled)
-        .map(|item| item.time_seconds)
-        .sum::<u64>()
+    tab.urls.iter().filter(|item| item.enabled).map(|item| item.time_seconds).sum::<u64>()
 }
 
 fn app_kind_label(kind: &str) -> &str {
@@ -833,6 +588,11 @@ fn ratio(value: u64, total: u64) -> f64 {
     } else {
         value as f64 / total as f64
     }
+}
+
+fn session_label(session: &SessionRecord) -> String {
+    let value = session.stopped_at.as_deref().unwrap_or(session.started_at.as_str());
+    value.replace('T', " ").replace('Z', "").chars().take(16).collect()
 }
 
 fn format_xlsx_error(error: XlsxError) -> String {

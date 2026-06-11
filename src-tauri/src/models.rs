@@ -42,6 +42,8 @@ pub struct ProjectRecord {
     pub sessions: Vec<SessionRecord>,
     pub apps: Vec<AppUsageRecord>,
     #[serde(default)]
+    pub selected_stage_ids: Vec<String>,
+    #[serde(default)]
     pub stages: Vec<ProjectStageRecord>,
 }
 
@@ -129,6 +131,14 @@ pub struct SessionRecord {
     pub duration_seconds: u64,
     pub app_count: usize,
     pub browser_count: usize,
+    #[serde(default)]
+    pub stages: Vec<SessionStageSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionStageSnapshot {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default)]
