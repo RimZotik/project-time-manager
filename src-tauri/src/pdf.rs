@@ -794,12 +794,12 @@ fn stage_timeline_pages(project: &ProjectRecord, stages: &[IncludedStage]) -> Ve
                             let left = ((segment.start - timeline_start).num_seconds().max(0) as f64 / total_seconds) * 100.0;
                             let width = ((segment.end - segment.start).num_seconds().max(1) as f64 / total_seconds) * 100.0;
                             format!(
-                                r#"<div class=\"timeline-block\" style=\"left:{left:.2}%;width:{width:.2}%\"></div>"#,
+                                r#"<div class="timeline-block" style="left:{left:.2}%;width:{width:.2}%"></div>"#,
                             )
                         })
                         .collect::<String>();
                     format!(
-                        r#"<div class=\"timeline-row\"><div class=\"timeline-name\">{name}<span class=\"timeline-summary\">{summary}</span></div><div class=\"timeline-track\">{blocks}</div></div>"#,
+                        r#"<div class="timeline-row"><div class="timeline-name">{name}<span class="timeline-summary">{summary}</span></div><div class="timeline-track">{blocks}</div></div>"#,
                         name = escape_html(&stage.name),
                         summary = escape_html(&format!("{} • {}", stage.session_count, format_duration(stage.seconds))),
                         blocks = blocks,
@@ -810,7 +810,7 @@ fn stage_timeline_pages(project: &ProjectRecord, stages: &[IncludedStage]) -> Ve
             page(
                 &format!("Таймлайн этапов{suffix}"),
                 &format!(
-                    r#"<p class=\"timeline-meta\">Границы таймлайна: {} -> {}.</p>{axis}{rows}"#,
+                    r#"<p class="timeline-meta">Границы таймлайна: {} -> {}.</p>{axis}{rows}"#,
                     escape_html(&timeline_start.format("%d.%m.%Y %H:%M").to_string()),
                     escape_html(&timeline_end.format("%d.%m.%Y %H:%M").to_string()),
                 ),
@@ -907,13 +907,13 @@ fn timeline_axis_html(
         .map(|ratio| {
             let point = start + Duration::seconds((total_seconds * ratio) as i64);
             format!(
-                r#"<span style=\"left:{:.2}%\">{}</span>"#,
+                r#"<span style="left:{:.2}%">{}</span>"#,
                 ratio * 100.0,
                 escape_html(&point.format("%d.%m %H:%M").to_string())
             )
         })
         .collect::<String>();
-    format!(r#"<div class=\"timeline-axis\">{markers}</div>"#)
+    format!(r#"<div class="timeline-axis">{markers}</div>"#)
 }
 
 fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {
@@ -964,4 +964,62 @@ fn escape_html(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ProjectRecord, ProjectStageRecord, SessionRecord, SessionStageSnapshot};
+
+    #[test]
+    fn timeline_html_is_valid_for_pdf_generation() {
+        let project = ProjectRecord {
+            name: "Demo".to_string(),
+            created_at: "2026-06-11T20:00:00+00:00".to_string(),
+            sessions: vec![SessionRecord {
+                id: "session-1".to_string(),
+                started_at: "2026-06-11T20:00:00+00:00".to_string(),
+                stopped_at: Some("2026-06-11T20:10:00+00:00".to_string()),
+                duration_seconds: 600,
+                app_count: 1,
+                browser_count: 1,
+                stages: vec![SessionStageSnapshot {
+                    id: "stage-1".to_string(),
+                    name: "Stage One".to_string(),
+                }],
+            }],
+            stages: vec![ProjectStageRecord {
+                id: "stage-1".to_string(),
+                name: "Stage One".to_string(),
+                order: 0,
+                created_at: "2026-06-11T19:59:00+00:00".to_string(),
+                updated_at: "2026-06-11T20:00:00+00:00".to_string(),
+                ..ProjectStageRecord::default()
+            }],
+            ..ProjectRecord::default()
+        };
+
+        let html = build_report_html(&project, &[], &[], &included_stages(&project), 0);
+        assert!(!html.contains("\\\"timeline-"));
+        assert!(html.contains("class=\"timeline-block\""));
+
+        let (font_bytes, _) = load_font_bytes().expect("font bytes");
+        let mut fonts = BTreeMap::new();
+        fonts.insert("ReportFont".to_string(), Base64OrRaw::Raw(font_bytes));
+        let mut warnings = Vec::<PdfWarnMsg>::new();
+
+        let document = PdfDocument::from_html(
+            &html,
+            &BTreeMap::new(),
+            &fonts,
+            &GeneratePdfOptions {
+                page_width: Some(210.0),
+                page_height: Some(297.0),
+                ..GeneratePdfOptions::default()
+            },
+            &mut warnings,
+        );
+
+        assert!(document.is_ok());
+    }
 }
