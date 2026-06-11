@@ -139,7 +139,10 @@ pub fn reserve_report_path(path: &Path) -> PathBuf {
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("report");
-        let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("bin");
+        let ext = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("bin");
         let stamp = Utc::now().format("%Y%m%d-%H%M%S");
         let fallback = path.with_file_name(format!("{stem}-{stamp}.{ext}"));
         if let Some(parent) = fallback.parent() {
@@ -227,7 +230,11 @@ pub fn rename_project_record(
         fs::create_dir_all(&new_dir).map_err(|err| err.to_string())?;
     }
 
-    let report_dir = if old_dir != new_dir { &new_dir } else { &old_dir };
+    let report_dir = if old_dir != new_dir {
+        &new_dir
+    } else {
+        &old_dir
+    };
     let old_xlsx = report_dir.join(format!("{old_stem}.xlsx"));
     let new_xlsx = new_dir.join(format!("{new_name}.xlsx"));
     if old_xlsx.exists() && old_xlsx != new_xlsx {
@@ -450,7 +457,11 @@ pub fn touch_tab_time(
         if tab.favicon_url.is_none() {
             tab.favicon_url = observation.favicon_url.clone();
         }
-        if let Some(url) = observation.url.as_deref().filter(|value| !value.trim().is_empty()) {
+        if let Some(url) = observation
+            .url
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
             touch_url_history(tab, url, &title);
         }
     }

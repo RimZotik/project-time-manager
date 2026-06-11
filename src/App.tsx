@@ -107,7 +107,9 @@ type ToastState = {
 
 type ProjectMenuState = {
   projectId: string;
-  anchorName: string;
+  projectName: string;
+  x: number;
+  y: number;
 };
 
 type RenameState = {
@@ -424,10 +426,15 @@ export default function App() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const settingsSaveSeqRef = useRef(0);
+  const settingsSavePendingRef = useRef(0);
 
   async function refresh() {
     const next = await invokeCommand<AppState>("get_app_state", {}, fallbackState);
-    setState(next);
+    setState((current) => ({
+      ...next,
+      settings: settingsSavePendingRef.current > 0 ? current.settings : next.settings,
+    }));
   }
 
   useEffect(() => {
@@ -565,11 +572,24 @@ export default function App() {
   }
 
   async function updateSettings(next: AppSettings) {
-    const updated = await invokeCommand<AppSettings>("update_app_settings", next, next);
+    const saveSeq = settingsSaveSeqRef.current + 1;
+    settingsSaveSeqRef.current = saveSeq;
+    settingsSavePendingRef.current += 1;
     setState((current) => ({
       ...current,
-      settings: updated,
+      settings: next,
     }));
+    try {
+      const updated = await invokeCommand<AppSettings>("update_app_settings", next, next);
+      if (settingsSaveSeqRef.current === saveSeq) {
+        setState((current) => ({
+          ...current,
+          settings: updated,
+        }));
+      }
+    } finally {
+      settingsSavePendingRef.current = Math.max(0, settingsSavePendingRef.current - 1);
+    }
   }
 
   async function openAppFolder() {
@@ -612,8 +632,8 @@ export default function App() {
         setProjectMenu(null);
       }}
     >
-      <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
-        <main className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)] gap-4 overflow-hidden">
+      <div className="mx-auto flex h-full w-full min-w-[1500px] max-w-[1760px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
+        <main className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] gap-4 overflow-hidden">
           <aside className="flex min-h-0 flex-col gap-4">
             <section className="flex min-h-0 flex-[1.08] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between gap-3">
@@ -640,7 +660,7 @@ export default function App() {
                 <div className="grid gap-2">
                   {state.projects.length ? (
                     state.projects.map((project) => (
-                      <div key={project.id} className="relative">
+                      <div key={project.id}>
                         <div
                           className={`flex w-full items-center justify-between gap-2 rounded-2xl border px-3 py-3 text-left transition ${
                             project.id === selectedProject?.id
@@ -656,10 +676,16 @@ export default function App() {
                             className="flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-emerald-700"
                             onClick={(event) => {
                               event.stopPropagation();
+                              const rect = event.currentTarget.getBoundingClientRect();
                               setProjectMenu(
                                 projectMenu?.projectId === project.id
                                   ? null
-                                  : { projectId: project.id, anchorName: project.name },
+                                  : {
+                                      projectId: project.id,
+                                      projectName: project.name,
+                                      x: Math.max(12, rect.right - 208),
+                                      y: rect.bottom + 8,
+                                    },
                               );
                             }}
                             title={t.projectLabel}
@@ -667,30 +693,6 @@ export default function App() {
                             <ChevronRight size={16} />
                           </button>
                         </div>
-                        {projectMenu?.projectId === project.id ? (
-                          <div
-                            className="absolute right-1 top-10 z-20 w-52 rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <button
-                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-emerald-50"
-                              onClick={() => {
-                                setRenameProject({ projectId: project.id, value: project.name });
-                                setProjectMenu(null);
-                              }}
-                            >
-                              <PencilLine size={15} />
-                              {t.projectMenuRename}
-                            </button>
-                            <button
-                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition-colors hover:bg-rose-50"
-                              onClick={() => removeProject(project.id)}
-                            >
-                              <Trash2 size={15} />
-                              {t.projectMenuDelete}
-                            </button>
-                          </div>
-                        ) : null}
                       </div>
                     ))
                   ) : (
@@ -736,7 +738,7 @@ export default function App() {
 
           <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden">
             <section className="rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_auto_auto] xl:items-center">
+              <div className="grid grid-cols-[minmax(420px,1fr)_auto_auto] items-center gap-4">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl font-semibold text-slate-900">{selectedProject?.name ?? t.appName}</h1>
@@ -745,10 +747,10 @@ export default function App() {
                       {statusLabel}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-500">{t.currentProjectHint}</p>
+                  <p className="whitespace-nowrap text-sm text-slate-500">{t.currentProjectHint}</p>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
+                <div className="flex flex-nowrap gap-2">
                   <button className="primary-button" onClick={() => toggleTracking("start_tracking")} disabled={isRunning || !selectedProject}>
                     <CirclePlay size={16} />
                     {isPaused ? t.continueLabel : t.startLabel}
@@ -763,7 +765,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-nowrap gap-2">
                   <button className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={isRecordingLocked}>
                     <Import size={16} />
                     {t.importJsonLabel}
@@ -784,7 +786,7 @@ export default function App() {
 
             {selectedProject ? (
               <>
-                <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+                <section className="grid grid-cols-4 gap-3">
                   <Metric label={t.totalProjectLabel} value={formatDuration(totals.appTime, language)} accent="emerald" />
                   <Metric label={t.sessionsCountLabel} value={String(sessions.length)} accent="emerald" />
                   <Metric label={t.topAppLabel} value={totals.topApp?.name ?? "-"} accent="slate" />
@@ -948,6 +950,31 @@ export default function App() {
           onOpenAppFolder={openAppFolder}
         />
       ) : null}
+      {projectMenu ? (
+        <div
+          className="fixed z-40 w-52 rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+          style={{ left: projectMenu.x, top: projectMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-emerald-50"
+            onClick={() => {
+              setRenameProject({ projectId: projectMenu.projectId, value: projectMenu.projectName });
+              setProjectMenu(null);
+            }}
+          >
+            <PencilLine size={15} />
+            {t.projectMenuRename}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition-colors hover:bg-rose-50"
+            onClick={() => removeProject(projectMenu.projectId)}
+          >
+            <Trash2 size={15} />
+            {t.projectMenuDelete}
+          </button>
+        </div>
+      ) : null}
       {renameProject ? (
         <RenameProjectModal
           state={renameProject}
@@ -1024,7 +1051,11 @@ function Checkbox({ checked, onChange }: { checked: boolean; onChange: (checked:
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">{text}</div>;
+  return (
+    <div className="flex min-h-11 w-full items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+      {text}
+    </div>
+  );
 }
 
 function Toast({ toast, label, onOpenExport }: { toast: ToastState; label: string; onOpenExport: (path?: string) => void }) {
@@ -1119,14 +1150,17 @@ function AppModal({
                   <Languages size={16} />
                   {t.languageLabel}
                 </span>
-                <select
-                  className="field"
-                  value={settings.language}
-                  onChange={(event) => onSettingsChange({ ...settings, language: event.target.value as AppSettings["language"] })}
-                >
-                  <option value="ru">{t.languageRu}</option>
-                  <option value="en">{t.languageEn}</option>
-                </select>
+                <span className="relative block">
+                  <select
+                    className="field appearance-none pr-12"
+                    value={settings.language}
+                    onChange={(event) => onSettingsChange({ ...settings, language: event.target.value as AppSettings["language"] })}
+                  >
+                    <option value="ru">{t.languageRu}</option>
+                    <option value="en">{t.languageEn}</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                </span>
               </label>
 
               <button className="secondary-button w-fit" onClick={onOpenAppFolder}>

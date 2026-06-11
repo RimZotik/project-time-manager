@@ -4,7 +4,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn export_project_pdf(project: &ProjectRecord, output_path: PathBuf) -> Result<PathBuf, String> {
+const APP_ROWS_PER_PAGE: usize = 20;
+const TAB_ROWS_PER_PAGE: usize = 18;
+const SESSION_ROWS_PER_PAGE: usize = 22;
+
+pub fn export_project_pdf(
+    project: &ProjectRecord,
+    output_path: PathBuf,
+) -> Result<PathBuf, String> {
     let (font_bytes, _) = load_font_bytes()?;
     let apps = included_apps(project);
     let tabs = included_tabs(project);
@@ -43,18 +50,11 @@ fn build_report_html(
     tabs: &[IncludedTab],
     total_seconds: u64,
 ) -> String {
-    let top_app = apps.first().map(|app| app.name.as_str()).unwrap_or("-");
-    let top_tab = tabs.first().map(|tab| tab.title.as_str()).unwrap_or("-");
-    let first_session = project
-        .sessions
-        .first()
-        .map(|session| session.started_at.as_str())
-        .unwrap_or(project.created_at.as_str());
-    let last_session = project
-        .sessions
-        .last()
-        .and_then(|session| session.stopped_at.as_deref())
-        .unwrap_or("-");
+    let mut pages = Vec::new();
+    pages.push(overview_page(project, apps, tabs, total_seconds));
+    pages.extend(app_pages(apps, total_seconds));
+    pages.extend(tab_pages(tabs, total_seconds));
+    pages.extend(session_pages(project));
 
     format!(
         r#"<!DOCTYPE html>
@@ -68,187 +68,380 @@ fn build_report_html(
       background: #f4faf6;
       color: #0f172a;
       font-family: ReportFont, Arial, sans-serif;
-      font-size: 12px;
+      font-size: 10.5px;
     }}
     .page {{
       width: 210mm;
-      min-height: 297mm;
-      padding: 14mm;
+      height: 297mm;
       box-sizing: border-box;
+      padding: 13mm 12mm;
       page-break-after: always;
+      overflow: hidden;
       background: #f8fbf8;
     }}
+    .page-title {{
+      margin: 0 0 12px;
+      padding: 11px 16px;
+      border-radius: 18px 18px 18px 5px;
+      background: #059669;
+      color: #ffffff;
+      text-align: center;
+      font-size: 18px;
+      line-height: 1.15;
+      font-weight: 800;
+    }}
     .hero {{
-      padding: 20px 22px;
-      border-radius: 22px;
-      background: linear-gradient(135deg, #047857 0%, #10b981 56%, #d9f99d 100%);
-      color: white;
+      margin-bottom: 12px;
+      padding: 18px 20px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #047857 0%, #10b981 58%, #a7f3d0 100%);
+      color: #ffffff;
     }}
     .eyebrow {{
       display: inline-block;
       padding: 5px 10px;
       border-radius: 999px;
       background: rgba(255,255,255,0.22);
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.9px;
       text-transform: uppercase;
     }}
     h1 {{
-      margin: 14px 0 8px;
-      font-size: 28px;
-      line-height: 1.1;
+      margin: 11px 0 6px;
+      font-size: 27px;
+      line-height: 1.12;
     }}
-    h2 {{
-      margin: 0;
-      padding: 9px 14px;
-      border-radius: 16px 16px 16px 4px;
-      background: #059669;
-      color: white;
-      font-size: 16px;
-    }}
-    .subtle {{ color: #64748b; }}
-    .grid {{
+    .muted {{ color: #64748b; }}
+    .metrics {{
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin-top: 14px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
     }}
     .metric {{
-      padding: 14px;
+      min-height: 55px;
+      padding: 10px;
       border: 1px solid #d1fae5;
-      border-radius: 18px;
-      background: white;
+      border-radius: 16px;
+      background: #ffffff;
     }}
     .metric span {{
       display: block;
       color: #64748b;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.9px;
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.65px;
       text-transform: uppercase;
     }}
     .metric strong {{
       display: block;
-      margin-top: 8px;
-      font-size: 18px;
+      margin-top: 7px;
       color: #064e3b;
+      font-size: 13.5px;
+      line-height: 1.15;
     }}
-    .section {{
-      margin-top: 18px;
-      padding: 14px;
+    .panel {{
+      margin-top: 10px;
+      padding: 12px;
       border: 1px solid #d1fae5;
-      border-radius: 22px;
-      background: white;
+      border-radius: 20px;
+      background: #ffffff;
+    }}
+    .panel h2 {{
+      margin: 0 0 9px;
+      color: #065f46;
+      font-size: 13px;
+    }}
+    .info-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 7px;
+    }}
+    .info {{
+      padding: 8px 10px;
+      border-radius: 13px;
+      background: #f8fafc;
+    }}
+    .info span {{
+      display: block;
+      color: #64748b;
+      font-size: 9px;
+    }}
+    .info strong {{
+      display: block;
+      margin-top: 4px;
+      color: #0f172a;
+      font-size: 11px;
     }}
     .bar-row {{
       display: grid;
-      grid-template-columns: 118px 1fr 70px;
-      gap: 10px;
+      grid-template-columns: 118px 1fr 62px;
+      gap: 8px;
       align-items: center;
-      margin-top: 10px;
-      font-size: 11px;
+      margin-top: 8px;
+      font-size: 9.5px;
+    }}
+    .bar-label {{
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: #0f172a;
+      font-weight: 700;
     }}
     .bar-track {{
-      height: 10px;
+      height: 9px;
       border-radius: 999px;
       background: #ecfdf5;
       overflow: hidden;
     }}
     .bar-fill {{
-      height: 10px;
-      border-radius: 999px;
+      height: 9px;
       background: linear-gradient(90deg, #10b981, #84cc16);
     }}
     table {{
       width: 100%;
-      border-collapse: separate;
-      border-spacing: 0 6px;
-      margin-top: 10px;
-      font-size: 10.5px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 9.5px;
     }}
     th {{
-      padding: 8px 10px;
+      padding: 7px 8px;
       background: #d1fae5;
       color: #064e3b;
+      border: 1px solid #bbf7d0;
       text-align: left;
+      font-weight: 800;
     }}
     td {{
-      padding: 8px 10px;
+      padding: 7px 8px;
+      border: 1px solid #e2e8f0;
       background: #ffffff;
-      border-top: 1px solid #e2e8f0;
-      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
     }}
-    td:first-child {{ border-left: 1px solid #e2e8f0; border-radius: 12px 0 0 12px; }}
-    td:last-child {{ border-right: 1px solid #e2e8f0; border-radius: 0 12px 12px 0; }}
+    .truncate {{
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }}
     .pill {{
       display: inline-block;
-      padding: 3px 8px;
+      padding: 3px 7px;
       border-radius: 999px;
       background: #ecfdf5;
       color: #047857;
-      font-weight: 700;
+      font-weight: 800;
+    }}
+    .empty {{
+      margin: 0;
+      padding: 14px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 16px;
+      background: #f8fafc;
+      color: #64748b;
     }}
   </style>
 </head>
-<body>
-  <section class="page">
-    <div class="hero">
-      <span class="eyebrow">Отчет по проекту</span>
-      <h1>{project_name}</h1>
-      <div>Учитываются только включенные приложения и домены.</div>
-    </div>
-    <div class="grid">
-      {metric_total}
-      {metric_sessions}
-      {metric_top_app}
-      {metric_top_tab}
-    </div>
-    <div class="section">
-      <h2>Общая информация</h2>
-      <table>
-        <tr><td>Дата начала</td><td>{first_session}</td></tr>
-        <tr><td>Последняя сессия</td><td>{last_session}</td></tr>
-        <tr><td>Приложений</td><td>{app_count}</td></tr>
-        <tr><td>Доменов</td><td>{tab_count}</td></tr>
-      </table>
-    </div>
-    <div class="section">
-      <h2>Распределение по приложениям</h2>
-      {app_bars}
-    </div>
-  </section>
-  <section class="page">
-    <div class="section">
-      <h2>Приложения</h2>
-      {apps_table}
-    </div>
-    <div class="section">
-      <h2>Домены и ссылки</h2>
-      {tabs_table}
-    </div>
-  </section>
-  <section class="page">
-    <div class="section">
-      <h2>Сеансы</h2>
-      {sessions_table}
-    </div>
-  </section>
-</body>
+<body>{pages}</body>
 </html>"#,
-        project_name = escape_html(&project.name),
-        first_session = escape_html(first_session),
-        last_session = escape_html(last_session),
-        app_count = apps.len(),
-        tab_count = tabs.len(),
-        metric_total = metric_card("Всего по проекту", &format_duration(total_seconds)),
-        metric_sessions = metric_card("Всего сеансов", &project.sessions.len().to_string()),
-        metric_top_app = metric_card("Топ приложение", top_app),
-        metric_top_tab = metric_card("Топ домен", top_tab),
-        app_bars = bars_html(apps.iter().take(8).map(|app| (&app.name, app.seconds)), total_seconds),
-        apps_table = apps_table_html(apps, total_seconds),
-        tabs_table = tabs_table_html(tabs, total_seconds),
-        sessions_table = sessions_table_html(project),
+        pages = pages.join("")
+    )
+}
+
+fn overview_page(
+    project: &ProjectRecord,
+    apps: &[IncludedApp],
+    tabs: &[IncludedTab],
+    total_seconds: u64,
+) -> String {
+    let top_app = apps.first().map(|app| app.name.as_str()).unwrap_or("-");
+    let top_tab = tabs.first().map(|tab| tab.title.as_str()).unwrap_or("-");
+    let first_session = project
+        .sessions
+        .first()
+        .map(|session| session.started_at.as_str())
+        .unwrap_or(project.created_at.as_str());
+    let last_session = project
+        .sessions
+        .last()
+        .and_then(|session| session.stopped_at.as_deref())
+        .unwrap_or("-");
+
+    page(
+        "Отчет по проекту",
+        &format!(
+            r#"<div class="hero">
+  <span class="eyebrow">Project Time Manager</span>
+  <h1>{project_name}</h1>
+  <div>Учитываются только включенные приложения и домены.</div>
+</div>
+<div class="metrics">
+  {metric_total}
+  {metric_sessions}
+  {metric_top_app}
+  {metric_top_tab}
+</div>
+<div class="panel">
+  <h2>Общая информация</h2>
+  <div class="info-grid">
+    {info_first}
+    {info_last}
+    {info_apps}
+    {info_tabs}
+  </div>
+</div>
+<div class="panel">
+  <h2>Распределение по приложениям</h2>
+  {app_bars}
+</div>"#,
+            project_name = escape_html(&project.name),
+            metric_total = metric_card("Всего по проекту", &format_duration(total_seconds)),
+            metric_sessions = metric_card("Всего сеансов", &project.sessions.len().to_string()),
+            metric_top_app = metric_card("Топ приложение", top_app),
+            metric_top_tab = metric_card("Топ домен", top_tab),
+            info_first = info_tile("Дата начала", first_session),
+            info_last = info_tile("Последняя сессия", last_session),
+            info_apps = info_tile("Приложений", &apps.len().to_string()),
+            info_tabs = info_tile("Доменов", &tabs.len().to_string()),
+            app_bars = bars_html(
+                apps.iter().take(7).map(|app| (&app.name, app.seconds)),
+                total_seconds
+            ),
+        ),
+    )
+}
+
+fn app_pages(apps: &[IncludedApp], total_seconds: u64) -> Vec<String> {
+    if apps.is_empty() {
+        return vec![page("Приложения", &empty_html())];
+    }
+
+    apps.chunks(APP_ROWS_PER_PAGE)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let suffix = if index == 0 {
+                ""
+            } else {
+                " продолжение"
+            };
+            page(
+                &format!("Приложения{suffix}"),
+                &simple_table(
+                    &[
+                        ("Название", "44%"),
+                        ("Тип", "18%"),
+                        ("Время", "20%"),
+                        ("%", "18%"),
+                    ],
+                    &chunk
+                        .iter()
+                        .map(|app| {
+                            vec![
+                                escape_html(&app.name),
+                                format!(
+                                    r#"<span class="pill">{}</span>"#,
+                                    app_kind_label(&app.kind)
+                                ),
+                                format_duration(app.seconds),
+                                percent(app.seconds, total_seconds),
+                            ]
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn tab_pages(tabs: &[IncludedTab], total_seconds: u64) -> Vec<String> {
+    if tabs.is_empty() {
+        return vec![page("Домены и ссылки", &empty_html())];
+    }
+
+    tabs.chunks(TAB_ROWS_PER_PAGE)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let suffix = if index == 0 {
+                ""
+            } else {
+                " продолжение"
+            };
+            page(
+                &format!("Домены и ссылки{suffix}"),
+                &simple_table(
+                    &[
+                        ("Браузер", "24%"),
+                        ("Домен", "34%"),
+                        ("Ссылок", "14%"),
+                        ("Время", "16%"),
+                        ("%", "12%"),
+                    ],
+                    &chunk
+                        .iter()
+                        .map(|tab| {
+                            vec![
+                                escape_html(&tab.browser),
+                                escape_html(&tab.title),
+                                tab.url_count.to_string(),
+                                format_duration(tab.seconds),
+                                percent(tab.seconds, total_seconds),
+                            ]
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn session_pages(project: &ProjectRecord) -> Vec<String> {
+    if project.sessions.is_empty() {
+        return vec![page("Сеансы", &empty_html())];
+    }
+
+    project
+        .sessions
+        .chunks(SESSION_ROWS_PER_PAGE)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let suffix = if index == 0 {
+                ""
+            } else {
+                " продолжение"
+            };
+            page(
+                &format!("Сеансы{suffix}"),
+                &simple_table(
+                    &[
+                        ("Начало", "24%"),
+                        ("Окончание", "24%"),
+                        ("Длительность", "18%"),
+                        ("Приложения", "17%"),
+                        ("Браузеры", "17%"),
+                    ],
+                    &chunk
+                        .iter()
+                        .map(|session| {
+                            vec![
+                                escape_html(&session.started_at),
+                                escape_html(session.stopped_at.as_deref().unwrap_or("-")),
+                                format_duration(session.duration_seconds),
+                                session.app_count.to_string(),
+                                session.browser_count.to_string(),
+                            ]
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn page(title: &str, body: &str) -> String {
+    format!(
+        r#"<section class="page"><h1 class="page-title">{}</h1>{}</section>"#,
+        escape_html(title),
+        body
     )
 }
 
@@ -260,83 +453,67 @@ fn metric_card(label: &str, value: &str) -> String {
     )
 }
 
+fn info_tile(label: &str, value: &str) -> String {
+    format!(
+        r#"<div class="info"><span>{}</span><strong>{}</strong></div>"#,
+        escape_html(label),
+        escape_html(value)
+    )
+}
+
 fn bars_html<'a>(items: impl Iterator<Item = (&'a String, u64)>, total_seconds: u64) -> String {
     let mut output = String::new();
     for (label, seconds) in items {
         let width = if total_seconds == 0 {
             0.0
         } else {
-            (seconds as f64 / total_seconds as f64 * 100.0).clamp(3.0, 100.0)
+            (seconds as f64 / total_seconds as f64 * 100.0).clamp(4.0, 100.0)
         };
         output.push_str(&format!(
-            r#"<div class="bar-row"><strong>{}</strong><div class="bar-track"><div class="bar-fill" style="width:{:.1}%"></div></div><span>{}</span></div>"#,
+            r#"<div class="bar-row"><div class="bar-label">{}</div><div class="bar-track"><div class="bar-fill" style="width:{:.1}%"></div></div><span>{}</span></div>"#,
             escape_html(label),
             width,
             format_duration(seconds)
         ));
     }
     if output.is_empty() {
-        output.push_str(r#"<p class="subtle">Данных пока нет.</p>"#);
+        empty_html()
+    } else {
+        output
     }
-    output
 }
 
-fn apps_table_html(apps: &[IncludedApp], total_seconds: u64) -> String {
-    let mut rows = String::new();
-    for app in apps {
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td><span class=\"pill\">{}</span></td><td>{}</td><td>{}</td></tr>",
-            escape_html(&app.name),
-            escape_html(&app.process_name),
-            app_kind_label(&app.kind),
-            format_duration(app.seconds),
-            percent(app.seconds, total_seconds)
-        ));
-    }
-    table_or_empty("Название|Процесс|Тип|Время|%", rows)
-}
-
-fn tabs_table_html(tabs: &[IncludedTab], total_seconds: u64) -> String {
-    let mut rows = String::new();
-    for tab in tabs {
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            escape_html(&tab.browser),
-            escape_html(&tab.title),
-            tab.url_count,
-            format_duration(tab.seconds),
-            percent(tab.seconds, total_seconds)
-        ));
-    }
-    table_or_empty("Браузер|Домен|Ссылок|Время|%", rows)
-}
-
-fn sessions_table_html(project: &ProjectRecord) -> String {
-    let mut rows = String::new();
-    for session in &project.sessions {
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td><td>{}</td></tr>",
-            escape_html(&session.started_at),
-            escape_html(session.stopped_at.as_deref().unwrap_or("-")),
-            format_duration(session.duration_seconds),
-            seconds_to_hours(session.duration_seconds),
-            session.app_count,
-            session.browser_count
-        ));
-    }
-    table_or_empty("Начало|Окончание|Длительность|Часы|Приложения|Браузер", rows)
-}
-
-fn table_or_empty(headers: &str, rows: String) -> String {
+fn simple_table(headers: &[(&str, &str)], rows: &[Vec<String>]) -> String {
     if rows.is_empty() {
-        return r#"<p class="subtle">Данных пока нет.</p>"#.to_string();
+        return empty_html();
     }
 
     let header_cells = headers
-        .split('|')
-        .map(|label| format!("<th>{}</th>", escape_html(label)))
+        .iter()
+        .map(|(label, width)| {
+            format!(
+                r#"<th style="width:{}">{}</th>"#,
+                escape_html(width),
+                escape_html(label)
+            )
+        })
         .collect::<String>();
-    format!("<table><thead><tr>{header_cells}</tr></thead><tbody>{rows}</tbody></table>")
+    let body = rows
+        .iter()
+        .map(|row| {
+            let cells = row
+                .iter()
+                .map(|value| format!(r#"<td><div class="truncate">{}</div></td>"#, value))
+                .collect::<String>();
+            format!("<tr>{cells}</tr>")
+        })
+        .collect::<String>();
+
+    format!("<table><thead><tr>{header_cells}</tr></thead><tbody>{body}</tbody></table>")
+}
+
+fn empty_html() -> String {
+    r#"<p class="empty">Данных пока нет.</p>"#.to_string()
 }
 
 fn load_font_bytes() -> Result<(Vec<u8>, String), String> {
@@ -364,7 +541,6 @@ fn load_font_bytes() -> Result<(Vec<u8>, String), String> {
 #[derive(Clone)]
 struct IncludedApp {
     name: String,
-    process_name: String,
     kind: String,
     seconds: u64,
 }
@@ -388,7 +564,6 @@ fn included_apps(project: &ProjectRecord) -> Vec<IncludedApp> {
             }
             Some(IncludedApp {
                 name: app.name.clone(),
-                process_name: app.process_name.clone(),
                 kind: app.kind.clone(),
                 seconds,
             })
@@ -447,10 +622,6 @@ fn app_kind_label(kind: &str) -> &str {
     } else {
         "Приложение"
     }
-}
-
-fn seconds_to_hours(seconds: u64) -> f64 {
-    seconds as f64 / 3600.0
 }
 
 fn format_duration(seconds: u64) -> String {

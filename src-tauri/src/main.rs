@@ -1,20 +1,28 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod export;
-mod pdf;
 mod models;
+mod pdf;
 mod storage;
 mod windows;
 
 use crate::export::export_project_xlsx;
-use crate::pdf::export_project_pdf;
 use crate::models::*;
+use crate::pdf::export_project_pdf;
 use crate::storage::*;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Manager, State};
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use windows::core::PCWSTR;
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::ShellExecuteW;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 struct TrackerDraft {
     started_at: String,
@@ -173,7 +181,8 @@ fn delete_project(state: State<'_, AppRuntime>, project_id: String) -> Result<()
     let mut store = state.store.lock().map_err(|err| err.to_string())?;
     store.projects.retain(|project| project.id != project_id);
     if store.workspace.selected_project_id.as_deref() == Some(project_id.as_str()) {
-        store.workspace.selected_project_id = store.projects.first().map(|project| project.id.clone());
+        store.workspace.selected_project_id =
+            store.projects.first().map(|project| project.id.clone());
     }
     save_workspace(&state.paths, &store.workspace)?;
     Ok(())
@@ -311,10 +320,21 @@ fn ensure_tracker_idle(state: &State<'_, AppRuntime>) -> Result<(), String> {
 fn open_path(target: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/C", "start", "", target])
-            .spawn()
-            .map_err(|err| err.to_string())?;
+        let operation = wide_null("open");
+        let target = wide_null(target);
+        let result = unsafe {
+            ShellExecuteW(
+                HWND(0),
+                PCWSTR(operation.as_ptr()),
+                PCWSTR(target.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as isize <= 32 {
+            return Err("Не удалось открыть файл или ссылку.".to_string());
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -334,6 +354,11 @@ fn open_path(target: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 fn normalized_language(language: &str) -> String {
