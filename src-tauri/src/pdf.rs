@@ -1,4 +1,5 @@
-use crate::models::{AppUsageRecord, ProjectRecord, TabUsageRecord};
+use crate::models::{AppUsageRecord, ProjectRecord, SessionStageSnapshot, TabUsageRecord};
+use chrono::{DateTime, Duration, FixedOffset};
 use printpdf::{Base64OrRaw, GeneratePdfOptions, PdfDocument, PdfSaveOptions, PdfWarnMsg};
 use std::collections::BTreeMap;
 use std::fs;
@@ -59,6 +60,7 @@ fn build_report_html(
     pages.extend(session_pages(project));
     if !stages.is_empty() {
         pages.extend(stage_pages(stages));
+        pages.extend(stage_timeline_pages(project, stages));
     }
 
     format!(
@@ -245,6 +247,65 @@ fn build_report_html(
       background: #f8fafc;
       color: #64748b;
     }}
+        .timeline-meta {{
+            margin: 0 0 10px;
+            color: #475569;
+            font-size: 9.5px;
+        }}
+        .timeline-axis {{
+            position: relative;
+            height: 24px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #cbd5e1;
+        }}
+        .timeline-axis span {{
+            position: absolute;
+            top: 0;
+            transform: translateX(-50%);
+            color: #64748b;
+            font-size: 8px;
+            white-space: nowrap;
+        }}
+        .timeline-axis span:first-child {{
+            transform: none;
+        }}
+        .timeline-axis span:last-child {{
+            transform: translateX(-100%);
+        }}
+        .timeline-row {{
+            display: grid;
+            grid-template-columns: 124px 1fr;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }}
+        .timeline-name {{
+            font-size: 9px;
+            font-weight: 700;
+            color: #0f172a;
+        }}
+        .timeline-summary {{
+            display: block;
+            margin-top: 2px;
+            color: #64748b;
+            font-size: 8px;
+            font-weight: 400;
+        }}
+        .timeline-track {{
+            position: relative;
+            height: 24px;
+            border-radius: 999px;
+            background: #ecfdf5;
+            overflow: hidden;
+            border: 1px solid #d1fae5;
+        }}
+        .timeline-block {{
+            position: absolute;
+            top: 3px;
+            bottom: 3px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #059669 0%, #10b981 100%);
+        }}
   </style>
 </head>
 <body>{pages}</body>
@@ -278,7 +339,7 @@ fn overview_page(
             r#"<div class="hero">
   <span class="eyebrow">Project Time Manager</span>
   <h1>{project_name}</h1>
-  <div>Учитываются только включенные приложения и домены.</div>
+    <div>Учитываются только включенные приложения, сайты и ссылки.</div>
 </div>
 <div class="metrics">
   {metric_total}
@@ -299,11 +360,11 @@ fn overview_page(
             metric_total = metric_card("Всего по проекту", &format_duration(total_seconds)),
             metric_sessions = metric_card("Всего сеансов", &project.sessions.len().to_string()),
             metric_top_app = metric_card("Топ приложение", top_app),
-            metric_top_tab = metric_card("Топ домен", top_tab),
+            metric_top_tab = metric_card("Топ сайт", top_tab),
             info_first = info_tile("Дата начала", first_session),
             info_last = info_tile("Последняя сессия", last_session),
             info_apps = info_tile("Приложений", &apps.len().to_string()),
-            info_tabs = info_tile("Доменов", &tabs.len().to_string()),
+            info_tabs = info_tile("Сайтов", &tabs.len().to_string()),
         ),
     )
 }
@@ -352,7 +413,7 @@ fn app_pages(apps: &[IncludedApp], total_seconds: u64) -> Vec<String> {
 
 fn tab_pages(tabs: &[IncludedTab], total_seconds: u64) -> Vec<String> {
     if tabs.is_empty() {
-        return vec![page("Домены и ссылки", &empty_html())];
+        return vec![page("Сайты и ссылки", &empty_html())];
     }
 
     tabs.chunks(TAB_ROWS_PER_PAGE)
@@ -364,11 +425,11 @@ fn tab_pages(tabs: &[IncludedTab], total_seconds: u64) -> Vec<String> {
                 " продолжение"
             };
             page(
-                &format!("Домены и ссылки{suffix}"),
+                &format!("Сайты и ссылки{suffix}"),
                 &simple_table(
                     &[
                         ("Браузер", "24%"),
-                        ("Домен", "34%"),
+                        ("Сайт", "34%"),
                         ("Ссылок", "14%"),
                         ("Время", "16%"),
                         ("%", "12%"),
@@ -532,10 +593,29 @@ struct IncludedTab {
 struct IncludedStage {
     id: String,
     name: String,
+    order: usize,
     seconds: u64,
     session_count: usize,
     first_used_at: String,
     last_used_at: String,
+    segments: Vec<StageSegment>,
+}
+
+#[derive(Clone)]
+struct StageSegment {
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+}
+
+#[derive(Clone)]
+struct SessionWindow {
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+    started_at: String,
+    stopped_at: String,
+    duration_seconds: u64,
+    stage_ids: Vec<String>,
+    stages: Vec<SessionStageSnapshot>,
 }
 
 fn included_apps(project: &ProjectRecord) -> Vec<IncludedApp> {
@@ -605,16 +685,10 @@ fn included_app_seconds(app: &AppUsageRecord) -> u64 {
 fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
     let mut stages = Vec::<IncludedStage>::new();
 
-    for session in project
-        .sessions
-        .iter()
-        .filter(|session| !session.stages.is_empty() && session.duration_seconds > 0)
-    {
-        let last_used_at = session
-            .stopped_at
-            .as_deref()
-            .unwrap_or(session.started_at.as_str())
-            .to_string();
+    let timeline_sessions = project_session_windows(project);
+
+    for session in timeline_sessions.iter().filter(|session| !session.stage_ids.is_empty()) {
+        let last_used_at = session.stopped_at.clone();
         for snapshot in &session.stages {
             if let Some(stage) = stages.iter_mut().find(|item| item.id == snapshot.id) {
                 stage.seconds = stage.seconds.saturating_add(session.duration_seconds);
@@ -627,28 +701,35 @@ fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
                 }
                 if let Some(current_stage) = project.stages.iter().find(|item| item.id == snapshot.id) {
                     stage.name = current_stage.name.clone();
+                    stage.order = current_stage.order;
                 }
                 continue;
             }
 
-            let stage_name = project
+            let stage_data = project
                 .stages
                 .iter()
                 .find(|item| item.id == snapshot.id)
-                .map(|item| item.name.clone())
-                .unwrap_or_else(|| snapshot.name.clone());
+                .map(|item| (item.name.clone(), item.order))
+                .unwrap_or_else(|| (snapshot.name.clone(), usize::MAX));
             stages.push(IncludedStage {
                 id: snapshot.id.clone(),
-                name: stage_name,
+                name: stage_data.0,
+                order: stage_data.1,
                 seconds: session.duration_seconds,
                 session_count: 1,
                 first_used_at: session.started_at.clone(),
                 last_used_at: last_used_at.clone(),
+                segments: Vec::new(),
             });
         }
     }
 
-    stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
+    for stage in &mut stages {
+        stage.segments = stage_segments(&timeline_sessions, &stage.id);
+    }
+
+    stages.sort_by(|left, right| left.order.cmp(&right.order).then(left.name.cmp(&right.name)));
     stages
 }
 
@@ -688,6 +769,151 @@ fn stage_pages(stages: &[IncludedStage]) -> Vec<String> {
             )
         })
         .collect()
+}
+
+fn stage_timeline_pages(project: &ProjectRecord, stages: &[IncludedStage]) -> Vec<String> {
+    let sessions = project_session_windows(project);
+    let Some((timeline_start, timeline_end)) = timeline_bounds(&sessions) else {
+        return Vec::new();
+    };
+    let total_seconds = (timeline_end - timeline_start).num_seconds().max(1) as f64;
+
+    stages
+        .chunks(8)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let suffix = if index == 0 { "" } else { " продолжение" };
+            let axis = timeline_axis_html(timeline_start, timeline_end);
+            let rows = chunk
+                .iter()
+                .map(|stage| {
+                    let blocks = stage
+                        .segments
+                        .iter()
+                        .map(|segment| {
+                            let left = ((segment.start - timeline_start).num_seconds().max(0) as f64 / total_seconds) * 100.0;
+                            let width = ((segment.end - segment.start).num_seconds().max(1) as f64 / total_seconds) * 100.0;
+                            format!(
+                                r#"<div class=\"timeline-block\" style=\"left:{left:.2}%;width:{width:.2}%\"></div>"#,
+                            )
+                        })
+                        .collect::<String>();
+                    format!(
+                        r#"<div class=\"timeline-row\"><div class=\"timeline-name\">{name}<span class=\"timeline-summary\">{summary}</span></div><div class=\"timeline-track\">{blocks}</div></div>"#,
+                        name = escape_html(&stage.name),
+                        summary = escape_html(&format!("{} • {}", stage.session_count, format_duration(stage.seconds))),
+                        blocks = blocks,
+                    )
+                })
+                .collect::<String>();
+
+            page(
+                &format!("Таймлайн этапов{suffix}"),
+                &format!(
+                    r#"<p class=\"timeline-meta\">Границы таймлайна: {} -> {}.</p>{axis}{rows}"#,
+                    escape_html(&timeline_start.format("%d.%m.%Y %H:%M").to_string()),
+                    escape_html(&timeline_end.format("%d.%m.%Y %H:%M").to_string()),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn project_session_windows(project: &ProjectRecord) -> Vec<SessionWindow> {
+    let mut sessions = project
+        .sessions
+        .iter()
+        .filter_map(|session| {
+            let start = parse_timestamp(&session.started_at)?;
+            let end = session_end(session, start)?;
+            if end <= start || session.duration_seconds == 0 {
+                return None;
+            }
+            Some(SessionWindow {
+                start,
+                end,
+                started_at: session.started_at.clone(),
+                stopped_at: session
+                    .stopped_at
+                    .clone()
+                    .unwrap_or_else(|| end.to_rfc3339()),
+                duration_seconds: session.duration_seconds,
+                stage_ids: session.stages.iter().map(|stage| stage.id.clone()).collect(),
+                stages: session.stages.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| left.start.cmp(&right.start));
+    sessions
+}
+
+fn stage_segments(sessions: &[SessionWindow], stage_id: &str) -> Vec<StageSegment> {
+    let mut segments = Vec::new();
+    let mut current: Option<StageSegment> = None;
+
+    for session in sessions {
+        let has_stage = session.stage_ids.iter().any(|id| id == stage_id);
+        if has_stage {
+            if let Some(active) = &mut current {
+                active.end = session.end;
+            } else {
+                current = Some(StageSegment {
+                    start: session.start,
+                    end: session.end,
+                });
+            }
+        } else if let Some(active) = current.take() {
+            segments.push(active);
+        }
+    }
+
+    if let Some(active) = current {
+        segments.push(active);
+    }
+
+    segments
+}
+
+fn parse_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(value).ok()
+}
+
+fn session_end(
+    session: &crate::models::SessionRecord,
+    start: DateTime<FixedOffset>,
+) -> Option<DateTime<FixedOffset>> {
+    session
+        .stopped_at
+        .as_deref()
+        .and_then(parse_timestamp)
+        .or_else(|| Some(start + Duration::seconds(session.duration_seconds as i64)))
+}
+
+fn timeline_bounds(
+    sessions: &[SessionWindow],
+) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
+    let first = sessions.first()?;
+    let last = sessions.last()?;
+    Some((first.start, last.end))
+}
+
+fn timeline_axis_html(
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+) -> String {
+    let total_seconds = (end - start).num_seconds().max(1) as f64;
+    let markers = [0.0_f64, 0.25, 0.5, 0.75, 1.0]
+        .iter()
+        .map(|ratio| {
+            let point = start + Duration::seconds((total_seconds * ratio) as i64);
+            format!(
+                r#"<span style=\"left:{:.2}%\">{}</span>"#,
+                ratio * 100.0,
+                escape_html(&point.format("%d.%m %H:%M").to_string())
+            )
+        })
+        .collect::<String>();
+    format!(r#"<div class=\"timeline-axis\">{markers}</div>"#)
 }
 
 fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {

@@ -287,6 +287,7 @@ fn toggle_stage_app_included(
     app_key: String,
     enabled: bool,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::toggle_stage_app(&state.paths, &project_id, &stage_id, &app_key, enabled)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -301,6 +302,7 @@ fn toggle_stage_tab_included(
     tab_key: String,
     enabled: bool,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::toggle_stage_tab(&state.paths, &project_id, &stage_id, &app_key, &tab_key, enabled)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)
@@ -316,6 +318,7 @@ fn toggle_stage_url_included(
     url: String,
     enabled: bool,
 ) -> Result<ProjectRecord, String> {
+    ensure_tracker_stopped(&state)?;
     let updated = crate::storage::toggle_stage_url(&state.paths, &project_id, &stage_id, &app_key, &tab_key, &url, enabled)?;
     sync_project_in_store(&state, updated.clone())?;
     Ok(updated)

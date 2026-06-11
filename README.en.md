@@ -2,7 +2,7 @@
 
 [README на русском](README.md)
 
-Project Time Manager is a Windows desktop time tracker for project work. You select a project, start tracking, and the app measures which applications and browser domains were active while you worked.
+Project Time Manager is a Windows desktop time tracker for project work. You select a project, start tracking, and the app measures which applications and browser sites were active while you worked.
 
 ![Project Time Manager screenshot](docs/screenshot.png)
 
@@ -12,8 +12,8 @@ Project Time Manager is a Windows desktop time tracker for project work. You sel
 - Track work sessions: start, pause, and stop.
 - Capture the active Windows foreground window through WinAPI.
 - Show apps with real icons, time, and percentage of project time.
-- Expand browsers into domain groups and store visited URLs for every domain.
-- Include or exclude apps and domains from totals without deleting raw time.
+- Expand browsers into site groups and store visited links for every site.
+- Include or exclude apps and sites from totals without deleting raw time.
 - Export Excel and PDF reports.
 - Store runtime data next to the app in the `data` folder.
 - Switch the interface between Russian and English.
@@ -40,7 +40,7 @@ When a project is renamed, the project folder and newly generated reports use th
 1. Create a project in the left column or select an existing one.
 2. Press `Start`.
 3. Work as usual: editing, development, browser research, documents.
-4. Disable checkboxes for apps or domains that should not count toward totals.
+4. Disable checkboxes for apps or sites that should not count toward totals.
 5. Press `Pause` or `Stop`.
 6. Export an Excel or PDF report.
 

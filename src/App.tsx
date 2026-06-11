@@ -9,7 +9,6 @@ import {
   CircleAlert,
   CirclePause,
   CirclePlay,
-  GripVertical,
   Download,
   FileText,
   FolderOpen,
@@ -215,7 +214,7 @@ const copy = {
     totalProjectLabel: "Всего по проекту",
     sessionsCountLabel: "Сеансов",
     topAppLabel: "Топ приложение",
-    topTabLabel: "Топ вкладка",
+    topTabLabel: "Топ сайт",
     appsTitle: "Приложения и вкладки",
     applicationHeader: "Приложение",
     timeHeader: "Время",
@@ -247,13 +246,13 @@ const copy = {
       "Нажми Старт, работай как обычно и затем поставь запись на паузу или останови ее. Во время записи импорт и экспорт отключены.",
     helpAppsTitle: "Приложения",
     helpAppsText:
-      "В таблице видно, какие окна были активны. Галочка управляет тем, учитывается ли приложение в итоговом времени и отчетах.",
+      "В таблице видно, что реально использовалось в проекте. Если снять галочку у приложения, сайта или ссылки, они исчезнут из итогового времени и отчетов.",
     helpSitesTitle: "Сайты",
     helpSitesText:
-      "Браузеры раскрываются как группы доменов. Нажми значок цепочки, чтобы увидеть все посещенные URL и открыть нужный в браузере.",
+      "У каждого браузера показываются сайты, а внутри сайта доступны его ссылки. Нажми на значок цепочки, чтобы открыть список ссылок и перейти по нужной.",
     helpReportsTitle: "Отчеты",
     helpReportsText:
-      "Excel и PDF строятся только по включенным приложениям и сайтам. Если файл уже открыт, новый отчет сохранится с временной меткой.",
+      "Excel и PDF собираются только из включенных приложений, сайтов, ссылок и реально использованных этапов. Если файл уже открыт, новый отчет сохранится с временной меткой.",
     projectMenuRename: "Переименовать",
     projectMenuDelete: "Удалить",
     projectMenuStages: "Этапы",
@@ -276,11 +275,15 @@ const copy = {
     stageDeleteConfirm: "Удалить этап полностью? Это действие нельзя отменить.",
     stageSelectionHint:
       "Нажми на этап, чтобы включить его в следующую сессию. Можно выбрать несколько.",
-    stageLockedHint:
-      "Менять этапы можно только при полностью остановленной записи.",
+    stageLockedHint: "Сначала остановите сессию, потом меняйте этапы.",
     stageManageLabel: "Управление этапами",
     stageUnusedLabel: "Не выбран",
     stageSelectedLabel: "Выбрано",
+    stageMetricsCount: "Количество",
+    stageMetricsSelectedCount: "Выбрано",
+    stageMetricsAll: "Все",
+    stageProjectDisabledHint:
+      "Сначала включите этот элемент в проекте, потом его можно включать в этапе.",
     reportTimeLabel: "В отчетах",
     actualTimeLabel: "Фактически",
     renameTitle: "Переименование проекта",
@@ -292,7 +295,7 @@ const copy = {
     openReportLabel: "Открыть файл",
     openUrlLabel: "Открыть ссылку",
     urlUnavailable: "URL недоступен",
-    linksInDomain: (count: number) => `${count} ссылок в этом домене`,
+    linksInDomain: (count: number) => `${count} ссылок у этого сайта`,
     dataFolderLabel: "Открыть папку приложения",
     languageRu: "Русский",
     languageEn: "English",
@@ -319,7 +322,7 @@ const copy = {
     totalProjectLabel: "Total project",
     sessionsCountLabel: "Sessions",
     topAppLabel: "Top app",
-    topTabLabel: "Top tab",
+    topTabLabel: "Top site",
     appsTitle: "Applications and tabs",
     applicationHeader: "Application",
     timeHeader: "Time",
@@ -350,13 +353,13 @@ const copy = {
       "Press Start, work as usual, then pause or stop the session. Import and export are disabled during active tracking.",
     helpAppsTitle: "Applications",
     helpAppsText:
-      "The table shows which windows were active. The checkbox controls whether the app counts toward totals and reports.",
+      "The table shows what was actually used in the project. If you clear a checkbox for an app, site, or link, it no longer counts in totals or reports.",
     helpSitesTitle: "Sites",
     helpSitesText:
-      "Browsers expand into domain groups. Click the chain icon to see every URL captured for that domain and open any one in your browser.",
+      "Each browser expands into sites, and each site contains its links. Click the chain icon to open the captured links and jump to the one you need.",
     helpReportsTitle: "Reports",
     helpReportsText:
-      "Excel and PDF are built only from enabled apps and sites. If a file is already open, the new report is saved with a timestamp.",
+      "Excel and PDF are built only from enabled apps, sites, links, and stages that were actually used. If a file is already open, the new report is saved with a timestamp.",
     projectMenuRename: "Rename",
     projectMenuDelete: "Delete",
     projectMenuStages: "Stages",
@@ -379,11 +382,15 @@ const copy = {
     stageDeleteConfirm: "Delete this stage completely? This cannot be undone.",
     stageSelectionHint:
       "Click a stage to include it in the next session. Multiple stages are allowed.",
-    stageLockedHint:
-      "Stages can be changed only when recording is fully stopped.",
+    stageLockedHint: "Stop the session first, then change stages.",
     stageManageLabel: "Manage stages",
     stageUnusedLabel: "Not selected",
     stageSelectedLabel: "Selected",
+    stageMetricsCount: "Count",
+    stageMetricsSelectedCount: "Selected",
+    stageMetricsAll: "All",
+    stageProjectDisabledHint:
+      "Enable this item in the project first, then it can be enabled in the stage.",
     reportTimeLabel: "In reports",
     actualTimeLabel: "Actual",
     renameTitle: "Rename project",
@@ -395,7 +402,7 @@ const copy = {
     openReportLabel: "Open file",
     openUrlLabel: "Open link",
     urlUnavailable: "URL unavailable",
-    linksInDomain: (count: number) => `${count} links in this domain`,
+    linksInDomain: (count: number) => `${count} links for this site`,
     dataFolderLabel: "Open app folder",
     languageRu: "Russian",
     languageEn: "English",
@@ -617,6 +624,170 @@ function tabUrlList(tab: TabUsageRecord): VisitedUrlRecord[] {
   );
 }
 
+function stageAppRecord(stage: ProjectStageRecord, appKey: string) {
+  return stage.apps.find((item) => item.app_key === appKey) ?? null;
+}
+
+function stageTabRecord(
+  stage: ProjectStageRecord,
+  appKey: string,
+  tabKey: string,
+) {
+  return (
+    stageAppRecord(stage, appKey)?.tabs.find(
+      (item) => item.tab_key === tabKey,
+    ) ?? null
+  );
+}
+
+function stageUrlRecord(
+  stage: ProjectStageRecord,
+  appKey: string,
+  tabKey: string,
+  url: string,
+) {
+  return (
+    stageTabRecord(stage, appKey, tabKey)?.urls.find(
+      (item) => item.url === url,
+    ) ?? null
+  );
+}
+
+function stageAppEnabled(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+): boolean {
+  if (!app.enabled) return false;
+  return stageAppRecord(stage, app.key)?.enabled ?? true;
+}
+
+function stageTabEnabled(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+  tab: TabUsageRecord,
+): boolean {
+  if (!stageAppEnabled(stage, app) || !tab.enabled) return false;
+  return stageTabRecord(stage, app.key, tab.key)?.enabled ?? true;
+}
+
+function stageLinkEnabled(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+  tab: TabUsageRecord,
+  link: VisitedUrlRecord,
+): boolean {
+  if (!stageTabEnabled(stage, app, tab) || !link.enabled) return false;
+  return stageUrlRecord(stage, app.key, tab.key, link.url)?.enabled ?? true;
+}
+
+function stageTabIncludedSeconds(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+  tab: TabUsageRecord,
+): number {
+  if (!stageTabEnabled(stage, app, tab)) return 0;
+  if (tab.urls?.length) {
+    return tab.urls.reduce(
+      (sum, link) =>
+        sum +
+        (stageLinkEnabled(stage, app, tab, link) ? actualLinkSeconds(link) : 0),
+      0,
+    );
+  }
+  return tab.time_seconds;
+}
+
+function stageAppIncludedSeconds(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+): number {
+  if (app.kind === "browser") {
+    return app.tabs.reduce(
+      (sum, tab) => sum + stageTabIncludedSeconds(stage, app, tab),
+      0,
+    );
+  }
+  return stageAppEnabled(stage, app) ? app.time_seconds : 0;
+}
+
+function sortRankedStageApps(
+  stage: ProjectStageRecord,
+  apps: AppUsageRecord[],
+  totalSeconds: number,
+): RankedApp[] {
+  return [...apps]
+    .map((app) => {
+      const includedSeconds = stageAppIncludedSeconds(stage, app);
+      const actualSeconds = appActualSeconds(app);
+      return {
+        app,
+        includedSeconds,
+        actualSeconds,
+        includedPercent: percentOf(totalSeconds, includedSeconds),
+        actualPercent: percentOf(totalSeconds, actualSeconds),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.includedSeconds - left.includedSeconds ||
+        right.actualSeconds - left.actualSeconds ||
+        left.app.name.localeCompare(right.app.name),
+    );
+}
+
+function sortRankedStageTabs(
+  stage: ProjectStageRecord,
+  app: AppUsageRecord,
+  totalSeconds: number,
+): RankedTab[] {
+  return [...app.tabs]
+    .map((tab) => {
+      const includedSeconds = stageTabIncludedSeconds(stage, app, tab);
+      const actualSeconds = tabActualSeconds(tab);
+      return {
+        tab,
+        includedSeconds,
+        actualSeconds,
+        includedPercent: percentOf(totalSeconds, includedSeconds),
+        actualPercent: percentOf(totalSeconds, actualSeconds),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.includedSeconds - left.includedSeconds ||
+        right.actualSeconds - left.actualSeconds ||
+        left.tab.title.localeCompare(right.tab.title),
+    );
+}
+
+function stageEntityTotals(stage: ProjectStageRecord, apps: AppUsageRecord[]) {
+  let enabled = 0;
+  let total = 0;
+
+  for (const app of apps) {
+    total += 1;
+    if (stageAppEnabled(stage, app)) {
+      enabled += 1;
+    }
+
+    for (const tab of app.tabs) {
+      total += 1;
+      if (stageTabEnabled(stage, app, tab)) {
+        enabled += 1;
+      }
+
+      for (const link of tabUrlList(tab)) {
+        total += 1;
+        if (stageLinkEnabled(stage, app, tab, link)) {
+          enabled += 1;
+        }
+      }
+    }
+  }
+
+  return { enabled, total };
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
@@ -681,7 +852,7 @@ export default function App() {
   const trackerStatus = state.tracker.status;
   const isRunning = trackerStatus === "running";
   const isPaused = trackerStatus === "paused";
-  const isRecordingLocked = isRunning;
+  const isRecordingLocked = isRunning || isPaused;
   const isStageEditingLocked = isRunning || isPaused;
   const statusLabel =
     trackerStatus === "running"
@@ -1697,8 +1868,9 @@ export default function App() {
           onClick={(event) => event.stopPropagation()}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-emerald-50"
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
             onClick={async () => {
+              if (isStageEditingLocked) return;
               setLinkMenu(null);
               if (selectedProject?.id !== projectMenu.projectId) {
                 await selectProject(projectMenu.projectId);
@@ -1706,6 +1878,8 @@ export default function App() {
               setStageModal({ projectId: projectMenu.projectId });
               setProjectMenu(null);
             }}
+            disabled={isStageEditingLocked}
+            title={isStageEditingLocked ? t.stageLockedHint : undefined}
           >
             <Activity size={15} />
             {t.projectMenuStages}
@@ -1823,6 +1997,8 @@ function StageSelectorCard({
   onToggle: (stageId: string) => void;
   onManage: () => void;
 }) {
+  const tooltip = disabled ? t.stageLockedHint : undefined;
+
   return (
     <article className="col-span-2 rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
       <div className="flex items-start justify-between gap-3">
@@ -1836,10 +2012,16 @@ function StageSelectorCard({
               : t.stageUnusedLabel}
           </strong>
         </div>
-        <button className="secondary-button min-h-10 px-3" onClick={onManage}>
-          <PencilLine size={15} />
-          {t.stageManageLabel}
-        </button>
+        <div title={tooltip}>
+          <button
+            className="secondary-button min-h-10 px-3"
+            onClick={() => !disabled && onManage()}
+            disabled={disabled}
+          >
+            <PencilLine size={15} />
+            {t.stageManageLabel}
+          </button>
+        </div>
       </div>
 
       <div className="stable-scroll mt-4 overflow-x-auto pb-1">
@@ -1848,18 +2030,19 @@ function StageSelectorCard({
             stages.map((stage) => {
               const isSelected = selectedStageIds.includes(stage.id);
               return (
-                <button
-                  key={stage.id}
-                  className={`rounded-2xl border px-4 py-2 text-sm font-medium transition ${
-                    isSelected
-                      ? "border-emerald-300 bg-emerald-100 text-emerald-900"
-                      : "border-slate-200 bg-slate-100 text-slate-500"
-                  } ${disabled ? "cursor-not-allowed opacity-70" : "hover:border-emerald-200 hover:text-slate-800"}`}
-                  onClick={() => !disabled && onToggle(stage.id)}
-                  disabled={disabled}
-                >
-                  {stage.name}
-                </button>
+                <div key={stage.id} title={tooltip}>
+                  <button
+                    className={`rounded-2xl border px-4 py-2 text-sm font-medium transition ${
+                      isSelected
+                        ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                        : "border-slate-200 bg-slate-100 text-slate-500"
+                    } ${disabled ? "cursor-not-allowed opacity-70" : "hover:border-emerald-200 hover:text-slate-800"}`}
+                    onClick={() => !disabled && onToggle(stage.id)}
+                    disabled={disabled}
+                  >
+                    {stage.name}
+                  </button>
+                </div>
               );
             })
           ) : (
@@ -1989,19 +2172,27 @@ function SectionTitle({
 function Checkbox({
   checked,
   onChange,
+  disabled = false,
+  title,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
-    <label className="relative flex size-8 items-center justify-center">
+    <label
+      className={`relative flex size-8 items-center justify-center ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+      title={title}
+    >
       <input
-        className="peer absolute inset-0 cursor-pointer opacity-0"
+        className="peer absolute inset-0 opacity-0"
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
-      <span className="flex size-5 items-center justify-center rounded-md border border-slate-300 bg-white text-transparent peer-checked:border-emerald-500 peer-checked:bg-emerald-500 peer-checked:text-white">
+      <span className="flex size-5 items-center justify-center rounded-md border border-slate-300 bg-white text-transparent peer-checked:border-emerald-500 peer-checked:bg-emerald-500 peer-checked:text-white peer-disabled:border-slate-200 peer-disabled:bg-slate-100 peer-disabled:text-slate-300">
         <Check size={14} />
       </span>
     </label>
@@ -2242,22 +2433,19 @@ function ProjectStagesModal({
   const [selectedStageId, setSelectedStageId] = useState<string | null>(
     project?.stages[0]?.id ?? null,
   );
-  const [stageName, setStageName] = useState(project?.stages[0]?.name ?? "");
-  const [dragStageId, setDragStageId] = useState<string | null>(null);
+  const [expandedStageApps, setExpandedStageApps] = useState<
+    Record<string, boolean>
+  >({});
+  const [stageLinkMenu, setStageLinkMenu] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalProject(project);
     const firstStage = project?.stages[0] ?? null;
-    const preservedStage =
-      project?.stages.find((stage) => stage.id === selectedStageId) ??
-      firstStage;
     setSelectedStageId((current) =>
       current && project?.stages.some((stage) => stage.id === current)
         ? current
         : (firstStage?.id ?? null),
     );
-    setStageName((current) => preservedStage?.name ?? current);
-    setDragStageId(null);
   }, [project]);
 
   const selectedStage =
@@ -2266,9 +2454,23 @@ function ProjectStagesModal({
     (left, right) => left.order - right.order,
   );
   const selectedCount = localProject?.selected_stage_ids.length ?? 0;
-  const selectedStageOrder = selectedStage
-    ? orderedStages.findIndex((stage) => stage.id === selectedStage.id) + 1
-    : 0;
+  const selectedStageApps = selectedStage
+    ? sortRankedStageApps(selectedStage, localProject?.apps ?? [], 0)
+    : [];
+  const stageTotalSeconds = selectedStageApps.reduce(
+    (sum, item) => sum + item.includedSeconds,
+    0,
+  );
+  const rankedStageApps = selectedStage
+    ? sortRankedStageApps(
+        selectedStage,
+        localProject?.apps ?? [],
+        stageTotalSeconds,
+      )
+    : [];
+  const stageTotals = selectedStage
+    ? stageEntityTotals(selectedStage, localProject?.apps ?? [])
+    : { enabled: 0, total: 0 };
 
   async function saveUpdatedProject(command: Promise<ProjectRecord | null>) {
     const updated = await command;
@@ -2284,11 +2486,14 @@ function ProjectStagesModal({
   }
 
   async function createStage() {
-    if (!localProject || !stageName.trim() || isLocked) return;
+    if (!localProject || isLocked) return;
+    const name = window.prompt(t.stageNamePlaceholder, "");
+    const trimmed = name?.trim();
+    if (!trimmed) return;
     const updated = await saveUpdatedProject(
       invokeCommand<ProjectRecord | null>(
         "create_stage",
-        { projectId: localProject.id, name: stageName.trim() },
+        { projectId: localProject.id, name: trimmed },
         null,
       ),
     );
@@ -2298,24 +2503,24 @@ function ProjectStagesModal({
         .sort((left, right) => left.order - right.order)
         .at(-1) ?? null;
     setSelectedStageId(next?.id ?? null);
-    setStageName(next?.name ?? stageName);
   }
 
   async function renameStage() {
-    if (!localProject || !selectedStage || !stageName.trim() || isLocked)
-      return;
+    if (!localProject || !selectedStage || isLocked) return;
+    const name = window.prompt(t.stageRenameLabel, selectedStage.name);
+    const trimmed = name?.trim();
+    if (!trimmed) return;
     await saveUpdatedProject(
       invokeCommand<ProjectRecord | null>(
         "rename_stage",
         {
           projectId: localProject.id,
           stageId: selectedStage.id,
-          name: stageName.trim(),
+          name: trimmed,
         },
         null,
       ),
     );
-    setStageName(stageName.trim());
   }
 
   async function removeStage() {
@@ -2330,7 +2535,6 @@ function ProjectStagesModal({
     );
     const next = updated?.stages[0] ?? null;
     setSelectedStageId(next?.id ?? null);
-    setStageName(next?.name ?? "");
   }
 
   async function moveStage(stageId: string, direction: number) {
@@ -2344,37 +2548,78 @@ function ProjectStagesModal({
     );
   }
 
-  async function moveStageToIndex(stageId: string, targetIndex: number) {
+  async function toggleStageSelected(stageId: string, enabled: boolean) {
     if (!localProject || isLocked) return;
-    const currentIndex = orderedStages.findIndex(
-      (stage) => stage.id === stageId,
-    );
-    if (currentIndex < 0 || currentIndex === targetIndex) return;
-    const direction = currentIndex < targetIndex ? 1 : -1;
-    let next = localProject;
-    let steps = Math.abs(targetIndex - currentIndex);
-    while (steps > 0) {
-      const updated = await invokeCommand<ProjectRecord | null>(
-        "reorder_stage",
-        { projectId: next.id, stageId, direction },
+    const nextIds = enabled
+      ? [...localProject.selected_stage_ids, stageId]
+      : localProject.selected_stage_ids.filter((item) => item !== stageId);
+    await saveUpdatedProject(
+      invokeCommand<ProjectRecord | null>(
+        "set_selected_project_stages",
+        { projectId: localProject.id, stageIds: nextIds },
         null,
-      );
-      if (!updated) return;
-      next = updated;
-      setLocalProject(updated);
-      onSetProjectState(updated);
-      steps -= 1;
-    }
-    const stage = next.stages.find((item) => item.id === stageId) ?? null;
-    setSelectedStageId(stage?.id ?? null);
-    setStageName(stage?.name ?? "");
+      ),
+    );
+  }
+
+  async function toggleStageApp(
+    stageId: string,
+    appKey: string,
+    enabled: boolean,
+  ) {
+    if (!localProject || isLocked) return;
+    await saveUpdatedProject(
+      invokeCommand<ProjectRecord | null>(
+        "toggle_stage_app_included",
+        { projectId: localProject.id, stageId, appKey, enabled },
+        null,
+      ),
+    );
+  }
+
+  async function toggleStageTab(
+    stageId: string,
+    appKey: string,
+    tabKey: string,
+    enabled: boolean,
+  ) {
+    if (!localProject || isLocked) return;
+    await saveUpdatedProject(
+      invokeCommand<ProjectRecord | null>(
+        "toggle_stage_tab_included",
+        { projectId: localProject.id, stageId, appKey, tabKey, enabled },
+        null,
+      ),
+    );
+  }
+
+  async function toggleStageUrl(
+    stageId: string,
+    appKey: string,
+    tabKey: string,
+    url: string,
+    enabled: boolean,
+  ) {
+    if (!localProject || isLocked) return;
+    await saveUpdatedProject(
+      invokeCommand<ProjectRecord | null>(
+        "toggle_stage_url_included",
+        { projectId: localProject.id, stageId, appKey, tabKey, url, enabled },
+        null,
+      ),
+    );
+  }
+
+  async function openStageUrl(url?: string | null) {
+    if (!url) return;
+    await invokeCommand<void>("open_external_url", { url }, undefined);
   }
 
   if (!localProject) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/24 px-5 backdrop-blur-sm">
-      <section className="flex h-[72vh] w-full max-w-[980px] flex-col overflow-hidden rounded-[30px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.22)]">
+      <section className="flex h-[78vh] w-full max-w-[1380px] flex-col overflow-hidden rounded-[30px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.22)]">
         <header className="flex items-start justify-between gap-4 bg-[linear-gradient(135deg,#ecfdf5_0%,#ffffff_62%,#dcfce7_100%)] px-7 py-6">
           <div>
             <span className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold uppercase text-white">
@@ -2396,219 +2641,471 @@ function ProjectStagesModal({
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_290px] gap-4 px-6 py-5">
+        <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-4 px-6 py-5">
           <section className="flex min-h-0 flex-col rounded-[26px] border border-emerald-100 bg-white p-4">
             {isLocked ? (
               <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 {t.stageLockedHint}
               </div>
             ) : null}
+            <div className="stable-scroll min-h-0 flex-1 overflow-y-scroll pr-1">
+              <div className="grid gap-2">
+                {orderedStages.length ? (
+                  orderedStages.map((stage, index) => {
+                    const isCurrent = stage.id === selectedStage?.id;
+                    const isStageSelected =
+                      localProject.selected_stage_ids.includes(stage.id);
 
-            <div className="mb-4 grid grid-cols-4 gap-3">
+                    return (
+                      <button
+                        key={stage.id}
+                        className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
+                          isCurrent
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-slate-200 bg-white hover:border-emerald-200"
+                        }`}
+                        onClick={() => setSelectedStageId(stage.id)}
+                        title={isLocked ? t.stageLockedHint : stage.name}
+                      >
+                        <div
+                          className="flex flex-col gap-2"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            className="icon-button h-8 w-8"
+                            onClick={() => moveStage(stage.id, -1)}
+                            title={t.stageUpLabel}
+                            disabled={index === 0 || isLocked}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            className="icon-button h-8 w-8"
+                            onClick={() => moveStage(stage.id, 1)}
+                            title={t.stageDownLabel}
+                            disabled={
+                              index === orderedStages.length - 1 || isLocked
+                            }
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                        </div>
+
+                        <span className="min-w-0">
+                          <strong className="block truncate text-sm text-slate-900">
+                            {stage.name}
+                          </strong>
+                          <small className="mt-1 block truncate text-xs text-slate-500">
+                            {formatDateTime(stage.updated_at, language)}
+                          </small>
+                        </span>
+
+                        <span onClick={(event) => event.stopPropagation()}>
+                          <Checkbox
+                            checked={isStageSelected}
+                            disabled={isLocked}
+                            title={
+                              isLocked
+                                ? t.stageLockedHint
+                                : t.stageSelectionHint
+                            }
+                            onChange={(checked) =>
+                              toggleStageSelected(stage.id, checked)
+                            }
+                          />
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <EmptyState text={t.stageEmpty} />
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <button
+                className="icon-button h-11 w-full"
+                onClick={createStage}
+                title={isLocked ? t.stageLockedHint : t.stageCreateLabel}
+                disabled={isLocked}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                className="icon-button h-11 w-full"
+                onClick={renameStage}
+                title={isLocked ? t.stageLockedHint : t.stageRenameLabel}
+                disabled={!selectedStage || isLocked}
+              >
+                <PencilLine size={16} />
+              </button>
+              <button
+                className="icon-button h-11 w-full text-rose-700 hover:bg-rose-50"
+                onClick={removeStage}
+                title={isLocked ? t.stageLockedHint : t.stageDeleteLabel}
+                disabled={!selectedStage || isLocked}
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </section>
+
+          <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
+            <section className="grid grid-cols-3 gap-3">
               <Metric
-                label={t.stageMetricsTime}
+                label={t.stageMetricsCount}
+                value={String(stageTotals.enabled)}
+                accent="emerald"
+              />
+              <Metric
+                label={t.stageMetricsSelectedCount}
                 value={String(selectedCount)}
                 accent="emerald"
               />
               <Metric
-                label={t.stageMetricsShare}
-                value={String(orderedStages.length)}
+                label={t.stageMetricsAll}
+                value={String(stageTotals.total)}
                 accent="slate"
               />
-              <Metric
-                label={t.stageMetricsApps}
-                value={selectedStageOrder ? String(selectedStageOrder) : "-"}
-                accent="emerald"
-              />
-              <Metric
-                label={t.stageMetricsTabs}
-                value={
-                  selectedStage ? t.stageSelectedLabel : t.stageUnusedLabel
-                }
-                accent="slate"
-              />
-            </div>
+            </section>
 
-            <section className="flex min-h-0 flex-1 flex-col rounded-[26px] border border-emerald-100 bg-white p-4">
+            <section className="flex min-h-0 flex-col rounded-[26px] border border-emerald-100 bg-white p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-slate-900">
-                  {t.stageTitle}
-                </h3>
-                <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
-                  {orderedStages.length}
-                </span>
-              </div>
-
-              <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-y-scroll pr-1">
-                <div className="grid gap-2">
-                  {orderedStages.length ? (
-                    orderedStages.map((stage, index) => {
-                      const isSelected = stage.id === selectedStage?.id;
-                      return (
-                        <div
-                          key={stage.id}
-                          className={`rounded-2xl border px-3 py-3 transition ${
-                            isSelected
-                              ? "border-emerald-300 bg-emerald-50"
-                              : "border-slate-200 bg-white hover:border-emerald-200"
-                          }`}
-                          draggable={!isLocked}
-                          onDragStart={() =>
-                            !isLocked && setDragStageId(stage.id)
-                          }
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={async () => {
-                            if (!dragStageId || dragStageId === stage.id)
-                              return;
-                            const sourceIndex = orderedStages.findIndex(
-                              (item) => item.id === dragStageId,
-                            );
-                            const targetIndex = orderedStages.findIndex(
-                              (item) => item.id === stage.id,
-                            );
-                            if (sourceIndex < 0 || targetIndex < 0) return;
-                            await moveStageToIndex(dragStageId, targetIndex);
-                            setDragStageId(null);
-                          }}
-                        >
-                          <button
-                            className="flex w-full items-center gap-3 text-left"
-                            onClick={() => {
-                              setSelectedStageId(stage.id);
-                              setStageName(stage.name);
-                            }}
-                          >
-                            <GripVertical
-                              size={15}
-                              className="shrink-0 text-slate-300"
-                            />
-                            <span className="min-w-0 flex-1">
-                              <strong className="block truncate text-sm text-slate-900">
-                                {stage.name}
-                              </strong>
-                              <small className="block text-xs text-slate-500">
-                                {formatDateTime(stage.updated_at, language)}
-                              </small>
-                            </span>
-                          </button>
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              className="icon-button h-9 w-9"
-                              onClick={() => moveStage(stage.id, -1)}
-                              title={t.stageUpLabel}
-                              disabled={index === 0 || isLocked}
-                            >
-                              <ArrowUp size={14} />
-                            </button>
-                            <button
-                              className="icon-button h-9 w-9"
-                              onClick={() => moveStage(stage.id, 1)}
-                              title={t.stageDownLabel}
-                              disabled={
-                                index === orderedStages.length - 1 || isLocked
-                              }
-                            >
-                              <ArrowDown size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <EmptyState text={t.stageEmpty} />
-                  )}
-                </div>
-              </div>
-            </section>
-          </section>
-
-          <aside className="flex min-h-0 flex-col gap-4">
-            <section className="rounded-[26px] border border-emerald-100 bg-white p-4">
-              <input
-                className="field"
-                value={stageName}
-                onChange={(event) => setStageName(event.target.value)}
-                placeholder={t.stageNamePlaceholder}
-                disabled={isLocked}
-              />
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <button
-                  className="icon-button h-11 w-full"
-                  onClick={createStage}
-                  title={t.stageCreateLabel}
-                  disabled={isLocked}
-                >
-                  <Plus size={16} />
-                </button>
-                <button
-                  className="icon-button h-11 w-full"
-                  onClick={renameStage}
-                  title={t.stageRenameLabel}
-                  disabled={!selectedStage || isLocked}
-                >
-                  <PencilLine size={16} />
-                </button>
-                <button
-                  className="icon-button h-11 w-full text-rose-700 hover:bg-rose-50"
-                  onClick={removeStage}
-                  title={t.stageDeleteLabel}
-                  disabled={!selectedStage || isLocked}
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-              <p className="mt-3 text-xs leading-5 text-slate-500">
-                {t.stageCreateHint}
-              </p>
-            </section>
-
-            <section className="rounded-[26px] border border-emerald-100 bg-white p-4">
-              <h3 className="text-base font-semibold text-slate-900">
-                {selectedStage?.name ?? t.stageTitle}
-              </h3>
-              <div className="mt-4 grid gap-3 text-sm text-slate-600">
                 <div>
-                  <strong className="block text-slate-900">
-                    {t.stageMetricsApps}
-                  </strong>
-                  <span className="mt-1 block">
-                    {selectedStageOrder ? `${selectedStageOrder}` : "-"}
-                  </span>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {selectedStage?.name ?? t.stageTitle}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {selectedStage
+                      ? formatDateTime(selectedStage.updated_at, language)
+                      : t.stageCreateHint}
+                  </p>
                 </div>
-                <div>
-                  <strong className="block text-slate-900">
-                    {t.stageMetricsTime}
-                  </strong>
-                  <span className="mt-1 block">
-                    {selectedStage &&
-                    localProject.selected_stage_ids.includes(selectedStage.id)
+                {selectedStage ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                    {localProject.selected_stage_ids.includes(selectedStage.id)
                       ? t.stageSelectedLabel
                       : t.stageUnusedLabel}
                   </span>
-                </div>
-                <div>
-                  <strong className="block text-slate-900">
-                    {t.stageMetricsShare}
-                  </strong>
-                  <span className="mt-1 block">
-                    {formatDateTime(selectedStage?.created_at, language)}
-                  </span>
-                </div>
-                <div>
-                  <strong className="block text-slate-900">
-                    {t.stageMetricsTabs}
-                  </strong>
-                  <span className="mt-1 block">
-                    {formatDateTime(selectedStage?.updated_at, language)}
-                  </span>
-                </div>
+                ) : null}
               </div>
-            </section>
 
-            <section className="rounded-[26px] border border-emerald-100 bg-white p-4 text-sm text-slate-600">
-              <p>{t.stageSelectionHint}</p>
+              {selectedStage ? (
+                <div className="mt-4 grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden">
+                  <div className="grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] gap-2 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4">
+                    <span />
+                    <span>{t.applicationHeader}</span>
+                    <span>{t.timeHeader}</span>
+                    <span>{t.percentHeader}</span>
+                  </div>
+
+                  <div className="stable-scroll min-h-0 overflow-y-scroll pr-1">
+                    <div className="grid gap-2">
+                      {rankedStageApps.map(
+                        ({
+                          app,
+                          includedSeconds,
+                          actualSeconds,
+                          includedPercent,
+                          actualPercent,
+                        }) => {
+                          const isOpen = expandedStageApps[app.key];
+                          const isIncluded = stageAppEnabled(
+                            selectedStage,
+                            app,
+                          );
+                          const checkboxTitle = !app.enabled
+                            ? t.stageProjectDisabledHint
+                            : isLocked
+                              ? t.stageLockedHint
+                              : undefined;
+
+                          return (
+                            <div key={app.key} className="grid gap-2">
+                              <div
+                                className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
+                                  isIncluded
+                                    ? "border-slate-200 bg-slate-50"
+                                    : "border-slate-200 bg-slate-100/80 text-slate-500"
+                                }`}
+                              >
+                                <Checkbox
+                                  checked={isIncluded}
+                                  disabled={!app.enabled || isLocked}
+                                  title={checkboxTitle}
+                                  onChange={(checked) =>
+                                    toggleStageApp(
+                                      selectedStage.id,
+                                      app.key,
+                                      checked,
+                                    )
+                                  }
+                                />
+
+                                <button
+                                  className="flex min-w-0 items-center gap-3 text-left"
+                                  onClick={() =>
+                                    setExpandedStageApps((prev) => ({
+                                      ...prev,
+                                      [app.key]: !prev[app.key],
+                                    }))
+                                  }
+                                >
+                                  <AppIcon app={app} />
+                                  <span className="min-w-0">
+                                    <strong
+                                      className={`block truncate text-sm ${isIncluded ? "text-slate-900" : "text-slate-500"}`}
+                                    >
+                                      {app.name}
+                                    </strong>
+                                    <small
+                                      className={`block truncate text-xs ${isIncluded ? "text-slate-500" : "text-slate-400"}`}
+                                    >
+                                      {app.kind === "browser"
+                                        ? t.browserLabel
+                                        : app.process_path || app.process_name}
+                                    </small>
+                                  </span>
+                                  {app.kind === "browser" ? (
+                                    <span className="ml-auto text-slate-400">
+                                      {isOpen ? (
+                                        <ChevronDown size={16} />
+                                      ) : (
+                                        <ChevronRight size={16} />
+                                      )}
+                                    </span>
+                                  ) : null}
+                                </button>
+
+                                <span className="text-sm text-slate-900">
+                                  {formatDuration(actualSeconds, language)}
+                                  <small className="mt-1 block text-xs text-slate-500">
+                                    {isIncluded
+                                      ? `${t.reportTimeLabel}: ${formatDuration(includedSeconds, language)}`
+                                      : `${t.reportTimeLabel}: 00:00:00`}
+                                  </small>
+                                </span>
+
+                                <span className="text-sm text-slate-500">
+                                  {isIncluded ? includedPercent : "0%"}
+                                  {!isIncluded ? (
+                                    <small className="mt-1 block text-xs text-slate-400">
+                                      {actualPercent}
+                                    </small>
+                                  ) : null}
+                                </span>
+                              </div>
+
+                              {app.kind === "browser" && isOpen ? (
+                                <div className="ml-4 grid gap-2 sm:ml-10">
+                                  {sortRankedStageTabs(
+                                    selectedStage,
+                                    app,
+                                    stageTotalSeconds,
+                                  ).map(
+                                    ({
+                                      tab,
+                                      includedSeconds: tabIncludedSeconds,
+                                      actualSeconds: tabActual,
+                                      includedPercent: tabIncludedPercent,
+                                      actualPercent: tabActualPercent,
+                                    }) => {
+                                      const urls = tabUrlList(tab);
+                                      const menuKey = `stage:${selectedStage.id}:${app.key}:${tab.key}`;
+                                      const isMenuOpen =
+                                        stageLinkMenu === menuKey;
+                                      const isTabIncluded = stageTabEnabled(
+                                        selectedStage,
+                                        app,
+                                        tab,
+                                      );
+                                      const tabCheckboxTitle = !tab.enabled
+                                        ? t.stageProjectDisabledHint
+                                        : isLocked
+                                          ? t.stageLockedHint
+                                          : undefined;
+
+                                      return (
+                                        <div
+                                          key={tab.key}
+                                          className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
+                                            isTabIncluded
+                                              ? "border-slate-200 bg-white"
+                                              : "border-slate-200 bg-slate-50 text-slate-500"
+                                          }`}
+                                        >
+                                          <Checkbox
+                                            checked={isTabIncluded}
+                                            disabled={!tab.enabled || isLocked}
+                                            title={tabCheckboxTitle}
+                                            onChange={(checked) =>
+                                              toggleStageTab(
+                                                selectedStage.id,
+                                                app.key,
+                                                tab.key,
+                                                checked,
+                                              )
+                                            }
+                                          />
+                                          <span className="flex min-w-0 items-center gap-3">
+                                            <TabIcon tab={tab} />
+                                            <span className="relative min-w-0">
+                                              <span className="flex max-w-full items-center gap-2">
+                                                <strong
+                                                  className={`block truncate text-sm ${isTabIncluded ? "text-slate-900" : "text-slate-500"}`}
+                                                >
+                                                  {tab.title}
+                                                </strong>
+                                                {urls.length ? (
+                                                  <button
+                                                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600 transition-colors hover:border-emerald-200 hover:bg-emerald-100"
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      setStageLinkMenu(
+                                                        isMenuOpen
+                                                          ? null
+                                                          : menuKey,
+                                                      );
+                                                    }}
+                                                    title={t.openUrlLabel}
+                                                  >
+                                                    <Link size={13} />
+                                                  </button>
+                                                ) : null}
+                                              </span>
+                                              <small
+                                                className={`block truncate text-xs ${isTabIncluded ? "text-slate-500" : "text-slate-400"}`}
+                                              >
+                                                {urls.length
+                                                  ? t.linksInDomain(urls.length)
+                                                  : t.urlUnavailable}
+                                              </small>
+                                              {isMenuOpen ? (
+                                                <div
+                                                  className="absolute left-0 top-12 z-20 w-[min(460px,70vw)] rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+                                                  onClick={(event) =>
+                                                    event.stopPropagation()
+                                                  }
+                                                >
+                                                  <div className="max-h-60 overflow-y-auto pr-1">
+                                                    {urls.map((item) => {
+                                                      const linkIncluded =
+                                                        stageLinkEnabled(
+                                                          selectedStage,
+                                                          app,
+                                                          tab,
+                                                          item,
+                                                        );
+                                                      const linkCheckboxTitle =
+                                                        !item.enabled
+                                                          ? t.stageProjectDisabledHint
+                                                          : isLocked
+                                                            ? t.stageLockedHint
+                                                            : undefined;
+
+                                                      return (
+                                                        <div
+                                                          key={item.url}
+                                                          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-emerald-50"
+                                                        >
+                                                          <Checkbox
+                                                            checked={
+                                                              linkIncluded
+                                                            }
+                                                            disabled={
+                                                              !item.enabled ||
+                                                              isLocked
+                                                            }
+                                                            title={
+                                                              linkCheckboxTitle
+                                                            }
+                                                            onChange={(
+                                                              checked,
+                                                            ) =>
+                                                              toggleStageUrl(
+                                                                selectedStage.id,
+                                                                app.key,
+                                                                tab.key,
+                                                                item.url,
+                                                                checked,
+                                                              )
+                                                            }
+                                                          />
+                                                          <button
+                                                            className="min-w-0 text-left"
+                                                            onClick={() => {
+                                                              setStageLinkMenu(
+                                                                null,
+                                                              );
+                                                              openStageUrl(
+                                                                item.url,
+                                                              );
+                                                            }}
+                                                          >
+                                                            <strong className="block truncate text-xs text-slate-900">
+                                                              {item.title ||
+                                                                item.url}
+                                                            </strong>
+                                                            <span className="block truncate text-xs text-slate-500">
+                                                              {item.url}
+                                                            </span>
+                                                          </button>
+                                                          <span className="font-mono text-xs text-slate-700">
+                                                            {formatDuration(
+                                                              item.time_seconds,
+                                                              language,
+                                                            )}
+                                                          </span>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                </div>
+                                              ) : null}
+                                            </span>
+                                          </span>
+                                          <span className="text-sm text-slate-900">
+                                            {formatDuration(
+                                              tabActual,
+                                              language,
+                                            )}
+                                            <small className="mt-1 block text-xs text-slate-500">
+                                              {isTabIncluded
+                                                ? `${t.reportTimeLabel}: ${formatDuration(tabIncludedSeconds, language)}`
+                                                : `${t.reportTimeLabel}: 00:00:00`}
+                                            </small>
+                                          </span>
+                                          <span className="text-sm text-slate-500">
+                                            {isTabIncluded
+                                              ? tabIncludedPercent
+                                              : "0%"}
+                                            {!isTabIncluded ? (
+                                              <small className="mt-1 block text-xs text-slate-400">
+                                                {tabActualPercent}
+                                              </small>
+                                            ) : null}
+                                          </span>
+                                        </div>
+                                      );
+                                    },
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <EmptyState text={t.stageEmpty} />
+                </div>
+              )}
             </section>
-          </aside>
+          </section>
         </div>
       </section>
     </div>

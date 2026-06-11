@@ -1,4 +1,7 @@
-use crate::models::{AppUsageRecord, ProjectRecord, SessionRecord, TabUsageRecord};
+use crate::models::{
+    AppUsageRecord, ProjectRecord, SessionRecord, SessionStageSnapshot, TabUsageRecord,
+};
+use chrono::{DateTime, Duration, FixedOffset};
 use rust_xlsxwriter::{
     Chart, ChartType, Color, Format, FormatAlign, FormatBorder, Workbook, XlsxError,
 };
@@ -36,6 +39,9 @@ struct ReportStyles {
     text: Format,
     number: Format,
     percent: Format,
+    timeline_header: Format,
+    timeline_empty: Format,
+    timeline_block: Format,
 }
 
 #[derive(Clone)]
@@ -59,10 +65,29 @@ struct IncludedTab {
 struct IncludedStage {
     id: String,
     name: String,
+    order: usize,
     seconds: u64,
     session_count: usize,
     first_used_at: String,
     last_used_at: String,
+    segments: Vec<StageSegment>,
+}
+
+#[derive(Clone)]
+struct StageSegment {
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+}
+
+#[derive(Clone)]
+struct SessionWindow {
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+    started_at: String,
+    stopped_at: String,
+    duration_seconds: u64,
+    stage_ids: Vec<String>,
+    stages: Vec<SessionStageSnapshot>,
 }
 
 impl ReportStyles {
@@ -108,6 +133,22 @@ impl ReportStyles {
                 .set_num_format("0.0%")
                 .set_border(FormatBorder::Thin)
                 .set_border_color(Color::RGB(0xE2E8F0)),
+            timeline_header: Format::new()
+                .set_align(FormatAlign::Center)
+                .set_font_color(Color::RGB(0x475569))
+                .set_background_color(Color::RGB(0xF8FAFC))
+                .set_border(FormatBorder::Thin)
+                .set_border_color(Color::RGB(0xCBD5E1)),
+            timeline_empty: Format::new()
+                .set_background_color(Color::RGB(0xF8FAFC))
+                .set_border(FormatBorder::Thin)
+                .set_border_color(Color::RGB(0xE2E8F0)),
+            timeline_block: Format::new()
+                .set_align(FormatAlign::Center)
+                .set_font_color(Color::White)
+                .set_background_color(Color::RGB(0x059669))
+                .set_border(FormatBorder::Thin)
+                .set_border_color(Color::RGB(0x047857)),
         }
     }
 }
@@ -140,7 +181,7 @@ fn write_report_sheet(
         .merge_range(0, 0, 0, 6, &format!("Отчет по проекту: {}", project.name), &styles.title)
         .map_err(format_xlsx_error)?;
     worksheet
-        .merge_range(1, 0, 1, 6, "Учитываются только включенные приложения и вкладки.", &styles.subtitle)
+        .merge_range(1, 0, 1, 6, "Учитываются только включенные приложения, сайты и ссылки.", &styles.subtitle)
         .map_err(format_xlsx_error)?;
 
     write_metric_text(worksheet, 3, 0, "Всего времени", &format_duration(total_seconds), styles)?;
@@ -151,11 +192,11 @@ fn write_report_sheet(
         .merge_range(6, 0, 6, 2, "Топ приложений", &styles.section)
         .map_err(format_xlsx_error)?;
     worksheet
-        .merge_range(6, 4, 6, 6, "Топ вкладок", &styles.section)
+        .merge_range(6, 4, 6, 6, "Топ сайтов", &styles.section)
         .map_err(format_xlsx_error)?;
 
     write_small_table_header(worksheet, 7, 0, &["Приложение", "Длительность", "%"], styles)?;
-    write_small_table_header(worksheet, 7, 4, &["Вкладка", "Длительность", "%"], styles)?;
+    write_small_table_header(worksheet, 7, 4, &["Сайт", "Длительность", "%"], styles)?;
 
     for (index, app) in apps.iter().take(8).enumerate() {
         let row = 8 + index as u32;
@@ -177,7 +218,7 @@ fn write_report_sheet(
 
     worksheet.write_string_with_format(7, 9, "Данные графика приложений", &styles.header).map_err(format_xlsx_error)?;
     worksheet.write_string_with_format(7, 10, "Часы", &styles.header).map_err(format_xlsx_error)?;
-    worksheet.write_string_with_format(7, 12, "Данные графика доменов", &styles.header).map_err(format_xlsx_error)?;
+    worksheet.write_string_with_format(7, 12, "Данные графика сайтов", &styles.header).map_err(format_xlsx_error)?;
     worksheet.write_string_with_format(7, 13, "Часы", &styles.header).map_err(format_xlsx_error)?;
 
     if !apps.is_empty() {
@@ -196,11 +237,11 @@ fn write_report_sheet(
     if !tabs.is_empty() {
         let last_row = 8 + tabs.len().min(8) as u32 - 1;
         let mut chart = Chart::new(ChartType::Bar);
-        chart.title().set_name("Домены проекта");
+        chart.title().set_name("Сайты проекта");
         chart.set_style(10);
         chart
             .add_series()
-            .set_name("Домены")
+            .set_name("Сайты")
             .set_categories(("Отчет", 8, 12, last_row, 12))
             .set_values(("Отчет", 8, 13, last_row, 13));
         worksheet.insert_chart(20, 8, &chart).map_err(format_xlsx_error)?;
@@ -257,7 +298,7 @@ fn write_tabs_sheet(
         worksheet,
         0,
         0,
-        &["Браузер", "Домен", "Основной URL", "Ссылок", "Длительность", "Часы"],
+        &["Браузер", "Сайт", "Основная ссылка", "Ссылок", "Длительность", "Часы"],
         styles,
     )?;
 
@@ -346,6 +387,8 @@ fn write_stages_sheet(
     worksheet.set_column_width(2, 14).map_err(format_xlsx_error)?;
     worksheet.set_column_width(3, 22).map_err(format_xlsx_error)?;
     worksheet.set_column_width(4, 22).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(5, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_width(6, 16).map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
@@ -368,39 +411,57 @@ fn write_stages_sheet(
         worksheet.autofilter(0, 0, stages.len() as u32, 4).map_err(format_xlsx_error)?;
     }
 
-    let timeline_sessions = stage_sessions(project);
-    if !timeline_sessions.is_empty() {
+    let timeline_sessions = project_session_windows(project);
+    if let Some((timeline_start, timeline_end)) = timeline_bounds(&timeline_sessions) {
+        let slot_seconds = timeline_slot_seconds((timeline_end - timeline_start).num_seconds());
+        let slot_count = timeline_slot_count(timeline_start, timeline_end, slot_seconds);
         let header_row = stages.len() as u32 + 4;
-        worksheet.write_string_with_format(header_row, 0, "Сессия", &styles.header).map_err(format_xlsx_error)?;
-        for (index, stage) in stages.iter().enumerate() {
-            worksheet.write_string_with_format(header_row, (index + 1) as u16, &stage.name, &styles.header).map_err(format_xlsx_error)?;
+        let axis_row = header_row + 1;
+
+        worksheet
+            .merge_range(header_row, 0, header_row, 6, "Таймлайн этапов", &styles.section)
+            .map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(axis_row, 0, "Этап", &styles.header).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(axis_row, 1, "Сеансов", &styles.header).map_err(format_xlsx_error)?;
+        worksheet.write_string_with_format(axis_row, 2, "Время", &styles.header).map_err(format_xlsx_error)?;
+
+        for slot_index in 0..slot_count {
+            let column = 3 + slot_index as u16;
+            worksheet.set_column_width(column, 5).map_err(format_xlsx_error)?;
+            let slot_start = timeline_start + Duration::seconds(slot_seconds * slot_index as i64);
+            let label = timeline_label(slot_start, slot_index, slot_count, slot_seconds);
+            worksheet.write_string_with_format(axis_row, column, &label, &styles.timeline_header).map_err(format_xlsx_error)?;
         }
 
-        for (session_index, session) in timeline_sessions.iter().enumerate() {
-            let row = header_row + 1 + session_index as u32;
-            worksheet.write_string_with_format(row, 0, &session_label(session), &styles.text).map_err(format_xlsx_error)?;
-            for (stage_index, stage) in stages.iter().enumerate() {
-                let value = if session.stages.iter().any(|item| item.id == stage.id) {
-                    seconds_to_hours(session.duration_seconds)
+        for (stage_index, stage) in stages.iter().enumerate() {
+            let row = axis_row + 1 + stage_index as u32;
+            worksheet.write_string_with_format(row, 0, &stage.name, &styles.text).map_err(format_xlsx_error)?;
+            worksheet.write_number_with_format(row, 1, stage.session_count as f64, &styles.number).map_err(format_xlsx_error)?;
+            worksheet.write_string_with_format(row, 2, &format_duration(stage.seconds), &styles.text).map_err(format_xlsx_error)?;
+
+            for slot_index in 0..slot_count {
+                worksheet.write_string_with_format(row, 3 + slot_index as u16, "", &styles.timeline_empty).map_err(format_xlsx_error)?;
+            }
+
+            for segment in &stage.segments {
+                let start_col = timeline_slot_index(timeline_start, segment.start, slot_seconds);
+                let end_col = timeline_slot_end_index(timeline_start, segment.end, slot_seconds, slot_count);
+                let label = if end_col.saturating_sub(start_col) >= 3 {
+                    format!(
+                        "{} - {}",
+                        segment.start.format("%d.%m %H:%M"),
+                        segment.end.format("%d.%m %H:%M")
+                    )
                 } else {
-                    0.0
+                    String::new()
                 };
-                worksheet.write_number_with_format(row, (stage_index + 1) as u16, value, &styles.number).map_err(format_xlsx_error)?;
+                if start_col == end_col {
+                    worksheet.write_string_with_format(row, 3 + start_col as u16, &label, &styles.timeline_block).map_err(format_xlsx_error)?;
+                } else {
+                    worksheet.merge_range(row, 3 + start_col as u16, row, 3 + end_col as u16, &label, &styles.timeline_block).map_err(format_xlsx_error)?;
+                }
             }
         }
-
-        let last_row = header_row + timeline_sessions.len() as u32;
-        let mut chart = Chart::new(ChartType::Column);
-        chart.title().set_name("Этапы по сессиям");
-        chart.set_style(10);
-        for (stage_index, stage) in stages.iter().enumerate() {
-            chart
-                .add_series()
-                .set_name(stage.name.as_str())
-                .set_categories(("Этапы", header_row + 1, 0, last_row, 0))
-                .set_values(("Этапы", header_row + 1, (stage_index + 1) as u16, last_row, (stage_index + 1) as u16));
-        }
-        worksheet.insert_chart(last_row + 3, 0, &chart).map_err(format_xlsx_error)?;
     }
 
     Ok(())
@@ -494,8 +555,10 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
 fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
     let mut stages = Vec::<IncludedStage>::new();
 
-    for session in stage_sessions(project) {
-        let last_used_at = session.stopped_at.as_deref().unwrap_or(session.started_at.as_str()).to_string();
+    let timeline_sessions = project_session_windows(project);
+
+    for session in timeline_sessions.iter().filter(|session| !session.stage_ids.is_empty()) {
+        let last_used_at = session.stopped_at.clone();
         for snapshot in &session.stages {
             if let Some(stage) = stages.iter_mut().find(|item| item.id == snapshot.id) {
                 stage.seconds = stage.seconds.saturating_add(session.duration_seconds);
@@ -508,36 +571,165 @@ fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
                 }
                 if let Some(current_stage) = project.stages.iter().find(|item| item.id == snapshot.id) {
                     stage.name = current_stage.name.clone();
+                    stage.order = current_stage.order;
                 }
             } else {
                 let stage_name = project
                     .stages
                     .iter()
                     .find(|item| item.id == snapshot.id)
-                    .map(|item| item.name.clone())
-                    .unwrap_or_else(|| snapshot.name.clone());
+                    .map(|item| (item.name.clone(), item.order))
+                    .unwrap_or_else(|| (snapshot.name.clone(), usize::MAX));
                 stages.push(IncludedStage {
                     id: snapshot.id.clone(),
-                    name: stage_name,
+                    name: stage_name.0,
+                    order: stage_name.1,
                     seconds: session.duration_seconds,
                     session_count: 1,
                     first_used_at: session.started_at.clone(),
                     last_used_at: last_used_at.clone(),
+                    segments: Vec::new(),
                 });
             }
         }
     }
 
-    stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
+    for stage in &mut stages {
+        stage.segments = stage_segments(&timeline_sessions, &stage.id);
+    }
+
+    stages.sort_by(|left, right| left.order.cmp(&right.order).then(left.name.cmp(&right.name)));
     stages
 }
 
-fn stage_sessions(project: &ProjectRecord) -> Vec<&SessionRecord> {
-    project
+fn project_session_windows(project: &ProjectRecord) -> Vec<SessionWindow> {
+    let mut sessions = project
         .sessions
         .iter()
-        .filter(|session| !session.stages.is_empty() && session.duration_seconds > 0)
-        .collect::<Vec<_>>()
+        .filter_map(|session| {
+            let start = parse_timestamp(&session.started_at)?;
+            let end = session_end(session, start)?;
+            if end <= start || session.duration_seconds == 0 {
+                return None;
+            }
+            Some(SessionWindow {
+                start,
+                end,
+                started_at: session.started_at.clone(),
+                stopped_at: session
+                    .stopped_at
+                    .clone()
+                    .unwrap_or_else(|| end.to_rfc3339()),
+                duration_seconds: session.duration_seconds,
+                stage_ids: session.stages.iter().map(|stage| stage.id.clone()).collect(),
+                stages: session.stages.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| left.start.cmp(&right.start));
+    sessions
+}
+
+fn stage_segments(sessions: &[SessionWindow], stage_id: &str) -> Vec<StageSegment> {
+    let mut segments = Vec::new();
+    let mut current: Option<StageSegment> = None;
+
+    for session in sessions {
+        let has_stage = session.stage_ids.iter().any(|id| id == stage_id);
+        if has_stage {
+            if let Some(active) = &mut current {
+                active.end = session.end;
+            } else {
+                current = Some(StageSegment {
+                    start: session.start,
+                    end: session.end,
+                });
+            }
+        } else if let Some(active) = current.take() {
+            segments.push(active);
+        }
+    }
+
+    if let Some(active) = current {
+        segments.push(active);
+    }
+
+    segments
+}
+
+fn parse_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(value).ok()
+}
+
+fn session_end(
+    session: &SessionRecord,
+    start: DateTime<FixedOffset>,
+) -> Option<DateTime<FixedOffset>> {
+    session
+        .stopped_at
+        .as_deref()
+        .and_then(parse_timestamp)
+        .or_else(|| Some(start + Duration::seconds(session.duration_seconds as i64)))
+}
+
+fn timeline_bounds(
+    sessions: &[SessionWindow],
+) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
+    let first = sessions.first()?;
+    let last = sessions.last()?;
+    Some((first.start, last.end))
+}
+
+fn timeline_slot_seconds(total_span_seconds: i64) -> i64 {
+    let span = total_span_seconds.max(1);
+    for candidate in [900_i64, 1800, 3600, 7200, 14400, 28800, 43200, 86400] {
+        if (span + candidate - 1) / candidate <= 64 {
+            return candidate;
+        }
+    }
+    86_400
+}
+
+fn timeline_slot_count(
+    start: DateTime<FixedOffset>,
+    end: DateTime<FixedOffset>,
+    slot_seconds: i64,
+) -> usize {
+    (((end - start).num_seconds().max(1) + slot_seconds - 1) / slot_seconds) as usize
+}
+
+fn timeline_slot_index(
+    timeline_start: DateTime<FixedOffset>,
+    value: DateTime<FixedOffset>,
+    slot_seconds: i64,
+) -> usize {
+    ((value - timeline_start).num_seconds().max(0) / slot_seconds) as usize
+}
+
+fn timeline_slot_end_index(
+    timeline_start: DateTime<FixedOffset>,
+    value: DateTime<FixedOffset>,
+    slot_seconds: i64,
+    slot_count: usize,
+) -> usize {
+    let offset = (value - timeline_start).num_seconds().max(1) - 1;
+    ((offset / slot_seconds) as usize).min(slot_count.saturating_sub(1))
+}
+
+fn timeline_label(
+    slot_start: DateTime<FixedOffset>,
+    slot_index: usize,
+    slot_count: usize,
+    slot_seconds: i64,
+) -> String {
+    if slot_index != 0 && slot_index != slot_count.saturating_sub(1) && slot_index % 4 != 0 {
+        return String::new();
+    }
+    if slot_seconds >= 86_400 {
+        slot_start.format("%d.%m").to_string()
+    } else {
+        slot_start.format("%d.%m\n%H:%M").to_string()
+    }
 }
 
 fn included_app_seconds(app: &AppUsageRecord) -> u64 {
@@ -588,11 +780,6 @@ fn ratio(value: u64, total: u64) -> f64 {
     } else {
         value as f64 / total as f64
     }
-}
-
-fn session_label(session: &SessionRecord) -> String {
-    let value = session.stopped_at.as_deref().unwrap_or(session.started_at.as_str());
-    value.replace('T', " ").replace('Z', "").chars().take(16).collect()
 }
 
 fn format_xlsx_error(error: XlsxError) -> String {
