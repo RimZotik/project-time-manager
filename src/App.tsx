@@ -13,10 +13,13 @@ import {
   FolderPlus,
   Import,
   Link,
+  Languages,
+  PencilLine,
   RefreshCw,
   Settings,
   Square,
   TimerReset,
+  Trash2,
   X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,6 +30,11 @@ type TrackerPayload = {
   status: TrackerStatus;
   active_project_id: string | null;
   running_since: string | null;
+};
+
+type AppSettings = {
+  autostart: boolean;
+  language: "ru" | "en";
 };
 
 type ProjectSummary = {
@@ -82,6 +90,7 @@ type ProjectRecord = ProjectSummary & {
 
 type AppState = {
   tracker: TrackerPayload;
+  settings: AppSettings;
   projects: ProjectSummary[];
   selected_project: ProjectRecord | null;
 };
@@ -94,6 +103,16 @@ type ExportResult = {
 type ToastState = {
   text: string;
   exportPath?: string;
+};
+
+type ProjectMenuState = {
+  projectId: string;
+  anchorName: string;
+};
+
+type RenameState = {
+  projectId: string;
+  value: string;
 };
 
 type RankedApp = {
@@ -118,8 +137,169 @@ const fallbackState: AppState = {
     active_project_id: null,
     running_since: null,
   },
+  settings: {
+    autostart: false,
+    language: "ru",
+  },
   projects: [],
   selected_project: null,
+};
+
+const copy = {
+  ru: {
+    appName: "Project Time Manager",
+    projectLabel: "Проекты",
+    sessionsLabel: "Сеансы",
+    settingsLabel: "Настройки",
+    helpLabel: "Помощь",
+    createLabel: "Создать",
+    projectNamePlaceholder: "Название проекта",
+    statusRunning: "Запись",
+    statusPaused: "Пауза",
+    statusStopped: "Остановлено",
+    startLabel: "Старт",
+    continueLabel: "Продолжить",
+    pauseLabel: "Пауза",
+    stopLabel: "Стоп",
+    importJsonLabel: "Импорт JSON",
+    exportExcelLabel: "Экспорт Excel",
+    exportPdfLabel: "PDF",
+    totalProjectLabel: "Всего по проекту",
+    sessionsCountLabel: "Сеансов",
+    topAppLabel: "Топ приложение",
+    topTabLabel: "Топ вкладка",
+    appsTitle: "Приложения и вкладки",
+    applicationHeader: "Приложение",
+    timeHeader: "Время",
+    percentHeader: "%",
+    browserLabel: "Браузер",
+    noProjects: "Пока нет проектов.",
+    noSessions: "Сеансы появятся после старта записи.",
+    emptyPrompt: "Выбери или создай проект, чтобы начать запись.",
+    currentProjectHint: "Выбери проект, запусти запись и отслеживай активные окна.",
+    projectCreated: "Проект создан.",
+    exportDone: "Экспорт выполнен.",
+    importDone: "Импорт выполнен.",
+    importedProject: "Импортирован проект",
+    settingsTitle: "Настройки",
+    settingsDescription: "Параметры приложения сохраняются автоматически.",
+    autostartLabel: "Автозапуск",
+    languageLabel: "Язык",
+    openFolderLabel: "Открыть папку приложения",
+    closeLabel: "Закрыть",
+    helpTitle: "Краткая инструкция",
+    helpDescription: "Основные действия для работы с проектами, записью времени и отчетами.",
+    helpProjectsTitle: "Проекты",
+    helpProjectsText:
+      "Создай проект в левом столбце или выбери существующий. Все записи и отчеты хранятся в папке проекта.",
+    helpTrackingTitle: "Запись времени",
+    helpTrackingText:
+      "Нажми Старт, работай как обычно и затем поставь запись на паузу или останови ее. Во время записи импорт и экспорт отключены.",
+    helpAppsTitle: "Приложения",
+    helpAppsText:
+      "В таблице видно, какие окна были активны. Галочка управляет тем, учитывается ли приложение в итоговом времени и отчетах.",
+    helpSitesTitle: "Сайты",
+    helpSitesText:
+      "Браузеры раскрываются как группы доменов. Нажми значок цепочки, чтобы увидеть все посещенные URL и открыть нужный в браузере.",
+    helpReportsTitle: "Отчеты",
+    helpReportsText:
+      "Excel и PDF строятся только по включенным приложениям и сайтам. Если файл уже открыт, новый отчет сохранится с временной меткой.",
+    projectMenuRename: "Переименовать",
+    projectMenuDelete: "Удалить",
+    renameTitle: "Переименование проекта",
+    renameDescription: "Введите новое название проекта.",
+    renamePlaceholder: "Новое название",
+    saveLabel: "Сохранить",
+    cancelLabel: "Отмена",
+    deleteConfirm: "Удалить проект полностью? Это действие нельзя отменить.",
+    openReportLabel: "Открыть файл",
+    openUrlLabel: "Открыть ссылку",
+    urlUnavailable: "URL недоступен",
+    linksInDomain: (count: number) => `${count} ссылок в этом домене`,
+    dataFolderLabel: "Открыть папку приложения",
+    languageRu: "Русский",
+    languageEn: "English",
+  },
+  en: {
+    appName: "Project Time Manager",
+    projectLabel: "Projects",
+    sessionsLabel: "Sessions",
+    settingsLabel: "Settings",
+    helpLabel: "Help",
+    createLabel: "Create",
+    projectNamePlaceholder: "Project name",
+    statusRunning: "Recording",
+    statusPaused: "Paused",
+    statusStopped: "Stopped",
+    startLabel: "Start",
+    continueLabel: "Continue",
+    pauseLabel: "Pause",
+    stopLabel: "Stop",
+    importJsonLabel: "Import JSON",
+    exportExcelLabel: "Export Excel",
+    exportPdfLabel: "PDF",
+    totalProjectLabel: "Total project",
+    sessionsCountLabel: "Sessions",
+    topAppLabel: "Top app",
+    topTabLabel: "Top tab",
+    appsTitle: "Applications and tabs",
+    applicationHeader: "Application",
+    timeHeader: "Time",
+    percentHeader: "%",
+    browserLabel: "Browser",
+    noProjects: "No projects yet.",
+    noSessions: "Sessions will appear after recording starts.",
+    emptyPrompt: "Choose or create a project to start recording.",
+    currentProjectHint: "Choose a project, start recording, and track active windows.",
+    projectCreated: "Project created.",
+    exportDone: "Export completed.",
+    importDone: "Import completed.",
+    importedProject: "Imported project",
+    settingsTitle: "Settings",
+    settingsDescription: "App preferences are saved automatically.",
+    autostartLabel: "Autostart",
+    languageLabel: "Language",
+    openFolderLabel: "Open app folder",
+    closeLabel: "Close",
+    helpTitle: "Quick guide",
+    helpDescription: "Main actions for projects, time tracking, and reports.",
+    helpProjectsTitle: "Projects",
+    helpProjectsText:
+      "Create a project in the left column or select an existing one. All records and reports live inside the project folder.",
+    helpTrackingTitle: "Tracking",
+    helpTrackingText:
+      "Press Start, work as usual, then pause or stop the session. Import and export are disabled during active tracking.",
+    helpAppsTitle: "Applications",
+    helpAppsText:
+      "The table shows which windows were active. The checkbox controls whether the app counts toward totals and reports.",
+    helpSitesTitle: "Sites",
+    helpSitesText:
+      "Browsers expand into domain groups. Click the chain icon to see every URL captured for that domain and open any one in your browser.",
+    helpReportsTitle: "Reports",
+    helpReportsText:
+      "Excel and PDF are built only from enabled apps and sites. If a file is already open, the new report is saved with a timestamp.",
+    projectMenuRename: "Rename",
+    projectMenuDelete: "Delete",
+    renameTitle: "Rename project",
+    renameDescription: "Enter the new project name.",
+    renamePlaceholder: "New name",
+    saveLabel: "Save",
+    cancelLabel: "Cancel",
+    deleteConfirm: "Delete this project completely? This cannot be undone.",
+    openReportLabel: "Open file",
+    openUrlLabel: "Open link",
+    urlUnavailable: "URL unavailable",
+    linksInDomain: (count: number) => `${count} links in this domain`,
+    dataFolderLabel: "Open app folder",
+    languageRu: "Russian",
+    languageEn: "English",
+  },
+} as const;
+
+type Copy = {
+  [K in keyof (typeof copy)["ru"]]: (typeof copy)["ru"][K] extends (...args: infer Args) => infer Return
+    ? (...args: Args) => Return
+    : string;
 };
 
 async function invokeCommand<T>(name: string, args: Record<string, unknown> = {}, fallback: T): Promise<T> {
@@ -131,21 +311,21 @@ async function invokeCommand<T>(name: string, args: Record<string, unknown> = {}
   }
 }
 
-function formatDuration(seconds: number): string {
+function formatDuration(seconds: number, language: AppSettings["language"] = "ru"): string {
   const value = Number(seconds || 0);
   const days = Math.floor(value / 86400);
   const hours = Math.floor((value % 86400) / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   const secs = value % 60;
   const clock = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  return days > 0 ? `${days} д ${clock}` : clock;
+  return days > 0 ? `${days} ${language === "en" ? "d" : "д"} ${clock}` : clock;
 }
 
-function formatDateTime(value?: string | null): string {
+function formatDateTime(value?: string | null, language: AppSettings["language"] = "ru"): string {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -200,7 +380,7 @@ function sortRankedApps(apps: AppUsageRecord[], totalSeconds: number): RankedApp
         actualPercent: percentOf(totalSeconds, actualSeconds),
       };
     })
-    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.app.name.localeCompare(right.app.name, "ru"))
+    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.app.name.localeCompare(right.app.name))
     .map((item) => item);
 }
 
@@ -216,7 +396,7 @@ function sortRankedTabs(app: AppUsageRecord, totalSeconds: number): RankedTab[] 
         actualPercent: percentOf(totalSeconds, tab.time_seconds),
       };
     })
-    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.tab.title.localeCompare(right.tab.title, "ru"))
+    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.tab.title.localeCompare(right.tab.title))
     .map((item) => item);
 }
 
@@ -237,6 +417,8 @@ export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
   const [linkMenu, setLinkMenu] = useState<string | null>(null);
+  const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
+  const [renameProject, setRenameProject] = useState<RenameState | null>(null);
   const [modal, setModal] = useState<"settings" | "help" | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -272,13 +454,16 @@ export default function App() {
   }, [toast]);
 
   const selectedProject = state.selected_project;
+  const settings = state.settings ?? fallbackState.settings;
+  const language = settings.language === "en" ? "en" : "ru";
+  const t = copy[language];
   const apps = selectedProject?.apps ?? [];
   const sessions = selectedProject?.sessions ?? [];
   const trackerStatus = state.tracker.status;
   const isRunning = trackerStatus === "running";
   const isPaused = trackerStatus === "paused";
   const isRecordingLocked = isRunning;
-  const statusLabel = trackerStatus === "running" ? "Запись" : trackerStatus === "paused" ? "Пауза" : "Остановлено";
+  const statusLabel = trackerStatus === "running" ? t.statusRunning : trackerStatus === "paused" ? t.statusPaused : t.statusStopped;
 
   const totals = useMemo(() => {
     const appTime = apps.reduce((sum, app) => sum + appIncludedSeconds(app), 0);
@@ -307,7 +492,7 @@ export default function App() {
         null,
       );
     setNewProjectName("");
-    setToast({ text: "Проект создан." });
+    setToast({ text: t.projectCreated });
     refresh();
   }
 
@@ -346,14 +531,14 @@ export default function App() {
   async function exportXlsx() {
     if (isRecordingLocked) return;
     const result = await invokeCommand<ExportResult | null>("export_selected_project_xlsx", {}, null);
-    setToast({ text: result?.message ?? "Экспорт выполнен.", exportPath: result?.path });
+    setToast({ text: result?.message ?? t.exportDone, exportPath: result?.path });
     refresh();
   }
 
   async function exportPdf() {
     if (isRecordingLocked) return;
     const result = await invokeCommand<ExportResult | null>("export_selected_project_pdf", {}, null);
-    setToast({ text: result?.message ?? "Экспорт выполнен.", exportPath: result?.path });
+    setToast({ text: result?.message ?? t.exportDone, exportPath: result?.path });
     refresh();
   }
 
@@ -364,7 +549,7 @@ export default function App() {
 
     const jsonText = await file.text();
     const result = await invokeCommand<ProjectSummary | null>("import_project_json", { jsonText }, null);
-    setToast({ text: result?.name ? `Импортирован проект: ${result.name}` : "Импорт выполнен." });
+    setToast({ text: result?.name ? `${t.importedProject}: ${result.name}` : t.importDone });
     event.target.value = "";
     refresh();
   }
@@ -379,18 +564,61 @@ export default function App() {
     await invokeCommand<void>("open_external_url", { url }, undefined);
   }
 
+  async function updateSettings(next: AppSettings) {
+    const updated = await invokeCommand<AppSettings>("update_app_settings", next, next);
+    setState((current) => ({
+      ...current,
+      settings: updated,
+    }));
+  }
+
+  async function openAppFolder() {
+    await invokeCommand<void>("open_app_folder", {}, undefined);
+  }
+
+  async function submitRenameProject() {
+    if (!renameProject?.value.trim()) return;
+    const updated = await invokeCommand<ProjectRecord | null>(
+      "rename_project",
+      { projectId: renameProject.projectId, name: renameProject.value.trim() },
+      null,
+    );
+    if (updated) {
+      setState((current) => ({
+        ...current,
+        projects: current.projects.map((project) =>
+          project.id === updated.id ? { ...project, name: updated.name, updated_at: updated.updated_at } : project,
+        ),
+        selected_project: current.selected_project?.id === updated.id ? updated : current.selected_project,
+      }));
+    }
+    setRenameProject(null);
+    refresh();
+  }
+
+  async function removeProject(projectId: string) {
+    if (!window.confirm(t.deleteConfirm)) return;
+    await invokeCommand<void>("delete_project", { projectId }, undefined);
+    setProjectMenu(null);
+    refresh();
+  }
+
   return (
     <div
       className="h-screen min-h-[900px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
       onContextMenu={(event) => event.preventDefault()}
+      onClick={() => {
+        setLinkMenu(null);
+        setProjectMenu(null);
+      }}
     >
       <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
         <main className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)] gap-4 overflow-hidden">
           <aside className="flex min-h-0 flex-col gap-4">
             <section className="flex min-h-0 flex-[1.08] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-slate-900">Проекты</h2>
-                <button className="icon-button" onClick={refresh} title="Обновить">
+                <h2 className="text-base font-semibold text-slate-900">{t.projectLabel}</h2>
+                <button className="icon-button" onClick={refresh} title={t.projectLabel}>
                   <RefreshCw size={16} />
                 </button>
               </div>
@@ -400,11 +628,11 @@ export default function App() {
                   className="field"
                   value={newProjectName}
                   onChange={(event) => setNewProjectName(event.target.value)}
-                  placeholder="Название проекта"
+                  placeholder={t.projectNamePlaceholder}
                 />
                 <button className="primary-button" onClick={createProject}>
                   <FolderPlus size={16} />
-                  Создать
+                  {t.createLabel}
                 </button>
               </div>
 
@@ -412,44 +640,81 @@ export default function App() {
                 <div className="grid gap-2">
                   {state.projects.length ? (
                     state.projects.map((project) => (
-                      <button
-                        key={project.id}
-                        className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
-                          project.id === selectedProject?.id
-                            ? "border-emerald-300 bg-emerald-50"
-                            : "border-slate-200 bg-white hover:border-emerald-200"
-                        }`}
-                        onClick={() => selectProject(project.id)}
-                      >
-                        <span className="min-w-0">
-                          <strong className="block truncate text-sm text-slate-900">{project.name}</strong>
-                          <span className="block truncate text-xs text-slate-500">Обновлен: {formatDateTime(project.updated_at)}</span>
-                        </span>
-                        <ChevronRight className="shrink-0 text-slate-300" size={15} />
-                      </button>
+                      <div key={project.id} className="relative">
+                        <div
+                          className={`flex w-full items-center justify-between gap-2 rounded-2xl border px-3 py-3 text-left transition ${
+                            project.id === selectedProject?.id
+                              ? "border-emerald-300 bg-emerald-50"
+                              : "border-slate-200 bg-white hover:border-emerald-200"
+                          }`}
+                        >
+                          <button className="min-w-0 flex-1 text-left" onClick={() => selectProject(project.id)}>
+                            <strong className="block truncate text-sm text-slate-900">{project.name}</strong>
+                            <span className="block truncate text-xs text-slate-500">{formatDateTime(project.updated_at, language)}</span>
+                          </button>
+                          <button
+                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-emerald-700"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setProjectMenu(
+                                projectMenu?.projectId === project.id
+                                  ? null
+                                  : { projectId: project.id, anchorName: project.name },
+                              );
+                            }}
+                            title={t.projectLabel}
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                        </div>
+                        {projectMenu?.projectId === project.id ? (
+                          <div
+                            className="absolute right-1 top-10 z-20 w-52 rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-emerald-50"
+                              onClick={() => {
+                                setRenameProject({ projectId: project.id, value: project.name });
+                                setProjectMenu(null);
+                              }}
+                            >
+                              <PencilLine size={15} />
+                              {t.projectMenuRename}
+                            </button>
+                            <button
+                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition-colors hover:bg-rose-50"
+                              onClick={() => removeProject(project.id)}
+                            >
+                              <Trash2 size={15} />
+                              {t.projectMenuDelete}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     ))
                   ) : (
-                    <EmptyState text="Пока нет проектов." />
+                    <EmptyState text={t.noProjects} />
                   )}
                 </div>
               </div>
             </section>
 
             <section className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <SectionTitle icon={<TimerReset size={16} />} title="Сеансы" />
+              <SectionTitle icon={<TimerReset size={16} />} title={t.sessionsLabel} />
               <div className="stable-scroll mt-3 min-h-0 flex-1 overflow-y-scroll pr-1">
                 <div className="grid gap-2">
                 {sessions.length ? (
                   sessions.map((session) => (
                     <article key={session.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <strong className="block text-sm text-slate-900">
-                        {formatDateTime(session.started_at)} — {formatDateTime(session.stopped_at)}
+                        {formatDateTime(session.started_at, language)} — {formatDateTime(session.stopped_at, language)}
                       </strong>
-                      <span className="mt-1 block text-sm text-slate-500">{formatDuration(session.duration_seconds)}</span>
+                      <span className="mt-1 block text-sm text-slate-500">{formatDuration(session.duration_seconds, language)}</span>
                     </article>
                   ))
                 ) : (
-                  <EmptyState text="Сеансы появятся после старта записи." />
+                  <EmptyState text={t.noSessions} />
                 )}
                 </div>
               </div>
@@ -459,11 +724,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2">
                 <button className="secondary-button min-h-10 px-3" onClick={() => setModal("settings")}>
                   <Settings size={16} />
-                  Настройки
+                  {t.settingsLabel}
                 </button>
                 <button className="secondary-button min-h-10 px-3" onClick={() => setModal("help")}>
                   <CircleAlert size={16} />
-                  Помощь
+                  {t.helpLabel}
                 </button>
               </div>
             </section>
@@ -474,42 +739,42 @@ export default function App() {
               <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_auto_auto] xl:items-center">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-xl font-semibold text-slate-900">{selectedProject?.name ?? "Project Time Manager"}</h1>
+                    <h1 className="text-xl font-semibold text-slate-900">{selectedProject?.name ?? t.appName}</h1>
                     <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase text-emerald-700">
                       <Activity size={13} />
                       {statusLabel}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-500">Выбери проект, запусти запись и отслеживай активные окна.</p>
+                  <p className="text-sm text-slate-500">{t.currentProjectHint}</p>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                   <button className="primary-button" onClick={() => toggleTracking("start_tracking")} disabled={isRunning || !selectedProject}>
                     <CirclePlay size={16} />
-                    {isPaused ? "Продолжить" : "Старт"}
+                    {isPaused ? t.continueLabel : t.startLabel}
                   </button>
                   <button className="secondary-button" onClick={() => toggleTracking("pause_tracking")} disabled={!isRunning || !selectedProject}>
                     <CirclePause size={16} />
-                    Пауза
+                    {t.pauseLabel}
                   </button>
                   <button className="secondary-button" onClick={() => toggleTracking("stop_tracking")} disabled={(!isRunning && !isPaused) || !selectedProject}>
                     <Square size={16} />
-                    Стоп
+                    {t.stopLabel}
                   </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <button className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={isRecordingLocked}>
                     <Import size={16} />
-                    Импорт JSON
+                    {t.importJsonLabel}
                   </button>
                   <button className="secondary-button" onClick={exportXlsx} disabled={isRecordingLocked}>
                     <Download size={16} />
-                    Экспорт Excel
+                    {t.exportExcelLabel}
                   </button>
                   <button className="secondary-button" onClick={exportPdf} disabled={isRecordingLocked}>
                     <FileText size={16} />
-                    PDF
+                    {t.exportPdfLabel}
                   </button>
                 </div>
               </div>
@@ -520,21 +785,21 @@ export default function App() {
             {selectedProject ? (
               <>
                 <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-                  <Metric label="Всего по проекту" value={formatDuration(totals.appTime)} accent="emerald" />
-                  <Metric label="Сеансов" value={String(sessions.length)} accent="emerald" />
-                  <Metric label="Топ приложение" value={totals.topApp?.name ?? "-"} accent="slate" />
-                  <Metric label="Топ вкладка" value={totals.topTab?.title ?? "-"} accent="slate" />
+                  <Metric label={t.totalProjectLabel} value={formatDuration(totals.appTime, language)} accent="emerald" />
+                  <Metric label={t.sessionsCountLabel} value={String(sessions.length)} accent="emerald" />
+                  <Metric label={t.topAppLabel} value={totals.topApp?.name ?? "-"} accent="slate" />
+                  <Metric label={t.topTabLabel} value={totals.topTab?.title ?? "-"} accent="slate" />
                 </section>
 
                 <section className="flex min-h-0 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                  <SectionTitle icon={<Activity size={16} />} title="Приложения и вкладки" />
+                  <SectionTitle icon={<Activity size={16} />} title={t.appsTitle} />
 
                   <div className="mt-4 grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden">
                     <div className="grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] gap-2 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4">
                       <span />
-                      <span>Приложение</span>
-                      <span>Время</span>
-                      <span>%</span>
+                      <span>{t.applicationHeader}</span>
+                      <span>{t.timeHeader}</span>
+                      <span>{t.percentHeader}</span>
                     </div>
 
                     <div className="stable-scroll min-h-0 overflow-y-scroll pr-1">
@@ -560,7 +825,7 @@ export default function App() {
                                   <span className="min-w-0">
                                     <strong className={`block truncate text-sm ${isIncluded ? "text-slate-900" : "text-slate-500"}`}>{app.name}</strong>
                                     <small className={`block truncate text-xs ${isIncluded ? "text-slate-500" : "text-slate-400"}`}>
-                                      {app.kind === "browser" ? "Браузер" : app.process_path || app.process_name}
+                                      {app.kind === "browser" ? t.browserLabel : app.process_path || app.process_name}
                                     </small>
                                   </span>
                                   {app.kind === "browser" ? (
@@ -569,8 +834,8 @@ export default function App() {
                                 </button>
 
                                 <span className="font-mono text-sm text-slate-700">
-                                  {isIncluded ? formatDuration(includedSeconds) : "00:00:00"}
-                                  {!isIncluded ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(actualSeconds)}</small> : null}
+                                  {isIncluded ? formatDuration(includedSeconds, language) : "00:00:00"}
+                                  {!isIncluded ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(actualSeconds, language)}</small> : null}
                                 </span>
                                 <span className="text-sm text-slate-500">
                                   {isIncluded ? includedPercent : "0%"}
@@ -606,18 +871,24 @@ export default function App() {
                                               {urls.length ? (
                                                 <button
                                                   className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600 transition-colors hover:border-emerald-200 hover:bg-emerald-100"
-                                                  onClick={() => setLinkMenu(isMenuOpen ? null : menuKey)}
-                                                  title="Ссылки домена"
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setLinkMenu(isMenuOpen ? null : menuKey);
+                                                  }}
+                                                  title={t.openUrlLabel}
                                                 >
                                                   <Link size={13} />
                                                 </button>
                                               ) : null}
                                             </span>
                                             <small className={`block truncate text-xs ${tab.enabled ? "text-slate-500" : "text-slate-400"}`}>
-                                              {urls.length ? `${urls.length} ссылок в этом домене` : "URL недоступен"}
+                                              {urls.length ? t.linksInDomain(urls.length) : t.urlUnavailable}
                                             </small>
                                             {isMenuOpen ? (
-                                              <div className="absolute left-0 top-12 z-20 w-[min(460px,70vw)] rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]">
+                                              <div
+                                                className="absolute left-0 top-12 z-20 w-[min(460px,70vw)] rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+                                                onClick={(event) => event.stopPropagation()}
+                                              >
                                                 <div className="max-h-60 overflow-y-auto pr-1">
                                                   {urls.map((item) => (
                                                     <button
@@ -638,8 +909,8 @@ export default function App() {
                                           </span>
                                         </span>
                                         <span className="font-mono text-sm text-slate-700">
-                                          {tab.enabled ? formatDuration(tabIncluded) : "00:00:00"}
-                                          {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(tabActual)}</small> : null}
+                                          {tab.enabled ? formatDuration(tabIncluded, language) : "00:00:00"}
+                                          {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(tabActual, language)}</small> : null}
                                         </span>
                                         <span className="text-sm text-slate-500">
                                           {tab.enabled ? tabIncludedPercent : "0%"}
@@ -660,15 +931,33 @@ export default function App() {
               </>
             ) : (
               <section className="rounded-[28px] border border-dashed border-emerald-200 bg-white p-8 text-sm text-slate-500 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                Выбери или создай проект, чтобы начать запись.
+                {t.emptyPrompt}
               </section>
             )}
           </section>
         </main>
       </div>
 
-      {modal ? <AppModal type={modal} onClose={() => setModal(null)} /> : null}
-      {toast ? <Toast toast={toast} onOpenExport={openExportLocation} /> : null}
+      {modal ? (
+        <AppModal
+          type={modal}
+          settings={settings}
+          t={t}
+          onClose={() => setModal(null)}
+          onSettingsChange={updateSettings}
+          onOpenAppFolder={openAppFolder}
+        />
+      ) : null}
+      {renameProject ? (
+        <RenameProjectModal
+          state={renameProject}
+          t={t}
+          onChange={(value) => setRenameProject((current) => (current ? { ...current, value } : current))}
+          onClose={() => setRenameProject(null)}
+          onSubmit={submitRenameProject}
+        />
+      ) : null}
+      {toast ? <Toast toast={toast} label={t.openReportLabel} onOpenExport={openExportLocation} /> : null}
     </div>
   );
 }
@@ -738,12 +1027,12 @@ function EmptyState({ text }: { text: string }) {
   return <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">{text}</div>;
 }
 
-function Toast({ toast, onOpenExport }: { toast: ToastState; onOpenExport: (path?: string) => void }) {
+function Toast({ toast, label, onOpenExport }: { toast: ToastState; label: string; onOpenExport: (path?: string) => void }) {
   return (
     <footer className="fixed bottom-5 right-5 flex max-w-[560px] items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(15,23,42,0.1)]">
       <span className="min-w-0 truncate">{toast.text}</span>
       {toast.exportPath ? (
-        <button className="icon-button bg-white" onClick={() => onOpenExport(toast.exportPath)} title="Открыть отчет">
+        <button className="icon-button bg-white" onClick={() => onOpenExport(toast.exportPath)} title={label}>
           <FolderOpen size={16} />
         </button>
       ) : null}
@@ -751,7 +1040,21 @@ function Toast({ toast, onOpenExport }: { toast: ToastState; onOpenExport: (path
   );
 }
 
-function AppModal({ type, onClose }: { type: "settings" | "help"; onClose: () => void }) {
+function AppModal({
+  type,
+  settings,
+  t,
+  onClose,
+  onSettingsChange,
+  onOpenAppFolder,
+}: {
+  type: "settings" | "help";
+  settings: AppSettings;
+  t: Copy;
+  onClose: () => void;
+  onSettingsChange: (settings: AppSettings) => void;
+  onOpenAppFolder: () => void;
+}) {
   const isHelp = type === "help";
 
   return (
@@ -762,12 +1065,12 @@ function AppModal({ type, onClose }: { type: "settings" | "help"; onClose: () =>
             <span className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold uppercase text-white">
               Project Time Manager
             </span>
-            <h2 className="mt-4 text-2xl font-semibold text-slate-900">{isHelp ? "Краткая инструкция" : "Настройки"}</h2>
+            <h2 className="mt-4 text-2xl font-semibold text-slate-900">{isHelp ? t.helpTitle : t.settingsTitle}</h2>
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
-              {isHelp ? "Основные действия для работы с проектами, записью времени и отбором данных для отчетов." : "Здесь появятся параметры приложения, когда они понадобятся."}
+              {isHelp ? t.helpDescription : t.settingsDescription}
             </p>
           </div>
-          <button className="icon-button shrink-0" onClick={onClose} title="Закрыть">
+          <button className="icon-button shrink-0" onClick={onClose} title={t.closeLabel}>
             <X size={18} />
           </button>
         </header>
@@ -776,31 +1079,112 @@ function AppModal({ type, onClose }: { type: "settings" | "help"; onClose: () =>
           {isHelp ? (
             <div className="grid gap-4">
               <HelpItem
-                title="Проекты"
-                text="Создай проект в левом столбце или выбери существующий. Все записи, отчеты Excel/PDF и JSON проекта хранятся в папке этого проекта."
+                title={t.helpProjectsTitle}
+                text={t.helpProjectsText}
               />
               <HelpItem
-                title="Запись времени"
-                text="Нажми Старт, работай как обычно и затем поставь запись на паузу или останови ее. Во время активной записи импорт и экспорт отключены."
+                title={t.helpTrackingTitle}
+                text={t.helpTrackingText}
               />
               <HelpItem
-                title="Приложения"
-                text="В таблице видно, какие окна были активны. Галочка управляет тем, учитывается ли приложение в итоговом времени и отчетах."
+                title={t.helpAppsTitle}
+                text={t.helpAppsText}
               />
               <HelpItem
-                title="Сайты"
-                text="Браузеры раскрываются как группы доменов. Нажми значок цепочки у домена, чтобы увидеть все посещенные URL и открыть нужный в браузере."
+                title={t.helpSitesTitle}
+                text={t.helpSitesText}
               />
               <HelpItem
-                title="Отчеты"
-                text="Excel и PDF строятся только по включенным приложениям и сайтам. Если отчет открыт в другой программе, новый файл сохраняется с временной меткой."
+                title={t.helpReportsTitle}
+                text={t.helpReportsText}
               />
             </div>
           ) : (
-            <div className="rounded-3xl border border-dashed border-emerald-200 bg-emerald-50/70 px-6 py-8 text-sm text-slate-600">
-              Настроек пока нет. Окно оставлено под будущие параметры приложения.
+            <div className="grid gap-4">
+              <label className="flex items-center justify-between gap-4 rounded-3xl border border-emerald-100 bg-slate-50 px-5 py-4">
+                <span>
+                  <strong className="block text-sm text-slate-900">{t.autostartLabel}</strong>
+                  <span className="mt-1 block text-xs text-slate-500">Windows</span>
+                </span>
+                <input
+                  className="size-5 accent-emerald-600"
+                  type="checkbox"
+                  checked={settings.autostart}
+                  onChange={(event) => onSettingsChange({ ...settings, autostart: event.target.checked })}
+                />
+              </label>
+
+              <label className="grid gap-2 rounded-3xl border border-emerald-100 bg-slate-50 px-5 py-4">
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Languages size={16} />
+                  {t.languageLabel}
+                </span>
+                <select
+                  className="field"
+                  value={settings.language}
+                  onChange={(event) => onSettingsChange({ ...settings, language: event.target.value as AppSettings["language"] })}
+                >
+                  <option value="ru">{t.languageRu}</option>
+                  <option value="en">{t.languageEn}</option>
+                </select>
+              </label>
+
+              <button className="secondary-button w-fit" onClick={onOpenAppFolder}>
+                <FolderOpen size={16} />
+                {t.openFolderLabel}
+              </button>
             </div>
           )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RenameProjectModal({
+  state,
+  t,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  state: RenameState;
+  t: Copy;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/24 px-5 backdrop-blur-sm">
+      <section className="w-full max-w-[460px] rounded-[28px] border border-emerald-100 bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,0.22)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">{t.renameTitle}</h2>
+            <p className="mt-2 text-sm text-slate-500">{t.renameDescription}</p>
+          </div>
+          <button className="icon-button shrink-0" onClick={onClose} title={t.closeLabel}>
+            <X size={18} />
+          </button>
+        </div>
+        <input
+          className="field mt-5"
+          value={state.value}
+          autoFocus
+          placeholder={t.renamePlaceholder}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onSubmit();
+            if (event.key === "Escape") onClose();
+          }}
+        />
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="secondary-button" onClick={onClose}>
+            {t.cancelLabel}
+          </button>
+          <button className="primary-button" onClick={onSubmit}>
+            <Check size={16} />
+            {t.saveLabel}
+          </button>
         </div>
       </section>
     </div>

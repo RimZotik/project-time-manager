@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppPayload {
     pub tracker: TrackerPayload,
+    pub settings: AppSettings,
     pub projects: Vec<ProjectSummary>,
     pub selected_project: Option<ProjectRecord>,
 }
@@ -12,6 +13,12 @@ pub struct TrackerPayload {
     pub status: String,
     pub active_project_id: Option<String>,
     pub running_since: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppSettings {
+    pub autostart: bool,
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

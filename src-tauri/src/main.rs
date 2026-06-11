@@ -51,6 +51,10 @@ fn get_app_state(state: State<'_, AppRuntime>) -> Result<AppPayload, String> {
 
     Ok(AppPayload {
         tracker: tracker_payload,
+        settings: AppSettings {
+            autostart: store.workspace.autostart,
+            language: normalized_language(&store.workspace.language),
+        },
         projects: store.projects.iter().map(ProjectRecord::summary).collect(),
         selected_project,
     })
@@ -66,22 +70,15 @@ fn create_project(
     let project = storage::create_project(&state.paths, &name, &client)?;
     store.projects.push(project.clone());
     store.workspace.selected_project_id = Some(project.id.clone());
-    save_workspace(
-        &state.paths,
-        &WorkspaceIndex {
-            selected_project_id: Some(project.id.clone()),
-        },
-    )?;
+    save_workspace(&state.paths, &store.workspace)?;
     Ok(project.summary())
 }
 
 #[tauri::command]
 fn select_project(state: State<'_, AppRuntime>, project_id: String) -> Result<(), String> {
-    {
-        let mut store = state.store.lock().map_err(|err| err.to_string())?;
-        store.workspace.selected_project_id = Some(project_id.clone());
-    }
-    set_selected_project(&state.paths, Some(project_id))
+    let mut store = state.store.lock().map_err(|err| err.to_string())?;
+    store.workspace.selected_project_id = Some(project_id);
+    save_workspace(&state.paths, &store.workspace)
 }
 
 #[tauri::command]
@@ -158,6 +155,61 @@ fn toggle_tab_included(
 }
 
 #[tauri::command]
+fn rename_project(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    name: String,
+) -> Result<ProjectRecord, String> {
+    ensure_tracker_idle(&state)?;
+    let updated = rename_project_record(&state.paths, &project_id, &name)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn delete_project(state: State<'_, AppRuntime>, project_id: String) -> Result<(), String> {
+    ensure_tracker_idle(&state)?;
+    delete_project_record(&state.paths, &project_id)?;
+    let mut store = state.store.lock().map_err(|err| err.to_string())?;
+    store.projects.retain(|project| project.id != project_id);
+    if store.workspace.selected_project_id.as_deref() == Some(project_id.as_str()) {
+        store.workspace.selected_project_id = store.projects.first().map(|project| project.id.clone());
+    }
+    save_workspace(&state.paths, &store.workspace)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_app_settings(
+    state: State<'_, AppRuntime>,
+    autostart: bool,
+    language: String,
+) -> Result<AppSettings, String> {
+    let normalized = normalized_language(&language);
+    {
+        let mut store = state.store.lock().map_err(|err| err.to_string())?;
+        store.workspace.autostart = autostart;
+        store.workspace.language = normalized.clone();
+        save_workspace(&state.paths, &store.workspace)?;
+    }
+
+    set_autostart_enabled(autostart)?;
+    Ok(AppSettings {
+        autostart,
+        language: normalized,
+    })
+}
+
+#[tauri::command]
+fn open_app_folder() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
+    let folder = exe
+        .parent()
+        .ok_or_else(|| "Application folder not found".to_string())?;
+    open_path(&folder.to_string_lossy())
+}
+
+#[tauri::command]
 fn import_project_json(
     state: State<'_, AppRuntime>,
     json_text: String,
@@ -168,8 +220,8 @@ fn import_project_json(
     {
         let mut store = state.store.lock().map_err(|err| err.to_string())?;
         store.workspace.selected_project_id = Some(project.id.clone());
+        save_workspace(&state.paths, &store.workspace)?;
     }
-    set_selected_project(&state.paths, Some(project.id.clone()))?;
     Ok(project.summary())
 }
 
@@ -284,6 +336,54 @@ fn open_path(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn normalized_language(language: &str) -> String {
+    match language.trim().to_lowercase().as_str() {
+        "en" => "en".to_string(),
+        _ => "ru".to_string(),
+    }
+}
+
+fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let exe = std::env::current_exe().map_err(|err| err.to_string())?;
+        let exe = exe.to_string_lossy().to_string();
+        let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+        let name = "Project Time Manager";
+        if enabled {
+            let status = Command::new("reg")
+                .args([
+                    "add",
+                    key,
+                    "/v",
+                    name,
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &format!("\"{}\"", exe),
+                    "/f",
+                ])
+                .status()
+                .map_err(|err| err.to_string())?;
+            if !status.success() {
+                return Err("Не удалось включить автозапуск.".to_string());
+            }
+        } else {
+            let _ = Command::new("reg")
+                .args(["delete", key, "/v", name, "/f"])
+                .status()
+                .map_err(|err| err.to_string())?;
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+    }
+
+    Ok(())
+}
+
 fn finalize_session(state: &State<'_, AppRuntime>) -> Result<(), String> {
     let mut tracker = state.tracker.lock().map_err(|err| err.to_string())?;
     let Some(project_id) = tracker.active_project_id.clone() else {
@@ -385,6 +485,7 @@ fn main() {
     let paths = storage_paths().expect("failed to resolve storage paths");
     ensure_storage(&paths).expect("failed to create storage");
     let store = load_store(&paths).expect("failed to load store");
+    let _ = set_autostart_enabled(store.workspace.autostart);
     let tracker = TrackerRuntime {
         status: "stopped".to_string(),
         active_project_id: store.workspace.selected_project_id.clone(),
@@ -411,11 +512,15 @@ fn main() {
             stop_tracking,
             toggle_app_included,
             toggle_tab_included,
+            rename_project,
+            delete_project,
+            update_app_settings,
             import_project_json,
             export_selected_project_xlsx,
             export_selected_project_pdf,
             open_report_file,
-            open_external_url
+            open_external_url,
+            open_app_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

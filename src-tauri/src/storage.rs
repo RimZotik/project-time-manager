@@ -10,14 +10,31 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct StoragePaths {
-    pub root: PathBuf,
     pub projects_dir: PathBuf,
     pub workspace_file: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceIndex {
     pub selected_project_id: Option<String>,
+    #[serde(default)]
+    pub autostart: bool,
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+fn default_language() -> String {
+    "ru".to_string()
+}
+
+impl Default for WorkspaceIndex {
+    fn default() -> Self {
+        Self {
+            selected_project_id: None,
+            autostart: false,
+            language: default_language(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -30,12 +47,11 @@ pub fn storage_paths() -> Result<StoragePaths, String> {
     let exe = std::env::current_exe().map_err(|err| err.to_string())?;
     let root = exe
         .parent()
-        .map(|parent| parent.join("Данные Project Time Manager"))
-        .unwrap_or_else(|| PathBuf::from("Данные Project Time Manager"));
+        .map(|parent| parent.join("data"))
+        .unwrap_or_else(|| PathBuf::from("data"));
     let projects_dir = root.join("Проекты");
     let workspace_file = root.join("workspace.json");
     Ok(StoragePaths {
-        root,
         projects_dir,
         workspace_file,
     })
@@ -175,6 +191,75 @@ pub fn save_project(paths: &StoragePaths, project: &ProjectRecord) -> Result<(),
     Ok(())
 }
 
+pub fn rename_project_record(
+    paths: &StoragePaths,
+    project_id: &str,
+    new_name: &str,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Название проекта не может быть пустым.".to_string());
+    }
+
+    let old_dir = project_dir(paths, &project);
+    let old_stem = project_file_stem(&project);
+    let new_name = sanitize_file_name(trimmed);
+
+    if new_name.is_empty() {
+        return Err("Название проекта не может быть пустым.".to_string());
+    }
+
+    if project.name == new_name {
+        project.updated_at = now_iso();
+        save_project(paths, &project)?;
+        return Ok(project);
+    }
+
+    let new_dir = paths.projects_dir.join(&new_name);
+    if new_dir.exists() && new_dir != old_dir {
+        return Err("Проект с таким названием уже существует.".to_string());
+    }
+
+    if old_dir.exists() && old_dir != new_dir {
+        fs::rename(&old_dir, &new_dir).map_err(|err| err.to_string())?;
+    } else {
+        fs::create_dir_all(&new_dir).map_err(|err| err.to_string())?;
+    }
+
+    let report_dir = if old_dir != new_dir { &new_dir } else { &old_dir };
+    let old_xlsx = report_dir.join(format!("{old_stem}.xlsx"));
+    let new_xlsx = new_dir.join(format!("{new_name}.xlsx"));
+    if old_xlsx.exists() && old_xlsx != new_xlsx {
+        let _ = fs::rename(&old_xlsx, &new_xlsx);
+    }
+
+    let old_pdf = report_dir.join(format!("{old_stem}.pdf"));
+    let new_pdf = new_dir.join(format!("{new_name}.pdf"));
+    if old_pdf.exists() && old_pdf != new_pdf {
+        let _ = fs::rename(&old_pdf, &new_pdf);
+    }
+
+    project.name = new_name;
+    project.updated_at = now_iso();
+    save_project(paths, &project)?;
+    Ok(project)
+}
+
+pub fn delete_project_record(paths: &StoragePaths, project_id: &str) -> Result<(), String> {
+    let project = load_project(paths, project_id)?;
+    let dir = project_dir(paths, &project);
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|err| err.to_string())?;
+    } else {
+        let path = project_path(paths, &project);
+        if path.exists() {
+            fs::remove_file(path).map_err(|err| err.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 pub fn load_project(paths: &StoragePaths, project_id: &str) -> Result<ProjectRecord, String> {
     let path = project_path_by_id(paths, project_id)?;
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
@@ -215,18 +300,6 @@ pub fn import_project_from_json(
     project.updated_at = now_iso();
     save_project(paths, &project)?;
     Ok(project)
-}
-
-pub fn set_selected_project(
-    paths: &StoragePaths,
-    project_id: Option<String>,
-) -> Result<(), String> {
-    save_workspace(
-        paths,
-        &WorkspaceIndex {
-            selected_project_id: project_id,
-        },
-    )
 }
 
 pub fn toggle_app(
@@ -545,31 +618,45 @@ fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
         return Ok(());
     };
 
-    let legacy_root = exe_dir.join("data");
-    if paths.workspace_file.exists() {
-        return Ok(());
-    }
-
-    let legacy_projects = legacy_root.join("projects");
-    if !legacy_projects.exists() {
-        return Ok(());
-    }
-
-    let legacy_workspace = legacy_root.join("workspace.json");
-    if legacy_workspace.exists() {
-        let _ = fs::copy(&legacy_workspace, &paths.workspace_file);
-    }
-
-    for entry in fs::read_dir(&legacy_projects).map_err(|err| err.to_string())? {
-        let path = entry.map_err(|err| err.to_string())?.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
+    let legacy_roots = [
+        exe_dir.join("Данные Project Time Manager"),
+        exe_dir.join("Данные приложения"),
+    ];
+    for legacy_root in legacy_roots {
+        let legacy_workspace = legacy_root.join("workspace.json");
+        if legacy_workspace.exists() && !paths.workspace_file.exists() {
+            let _ = fs::copy(&legacy_workspace, &paths.workspace_file);
         }
-        let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
-            let target = project_path(paths, &project);
-            if !target.exists() {
-                write_text_file(&target, &content)?;
+
+        for legacy_projects in [legacy_root.join("projects"), legacy_root.join("Проекты")] {
+            if !legacy_projects.exists() {
+                continue;
+            }
+
+            for entry in fs::read_dir(&legacy_projects).map_err(|err| err.to_string())? {
+                let path = entry.map_err(|err| err.to_string())?.path();
+                if path.is_dir() {
+                    let project_file = path.join("project.json");
+                    if !project_file.exists() {
+                        continue;
+                    }
+                    let content =
+                        fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
+                    if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                        let target = project_path(paths, &project);
+                        if !target.exists() {
+                            write_text_file(&target, &content)?;
+                        }
+                    }
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                    let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+                    if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                        let target = project_path(paths, &project);
+                        if !target.exists() {
+                            write_text_file(&target, &content)?;
+                        }
+                    }
+                }
             }
         }
     }
@@ -596,22 +683,34 @@ fn migrate_flat_project_files(paths: &StoragePaths) -> Result<(), String> {
 }
 
 fn migrate_legacy_exports(paths: &StoragePaths) -> Result<(), String> {
-    let legacy_exports = paths.root.join("exports");
-    if !legacy_exports.exists() {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    else {
         return Ok(());
-    }
+    };
 
-    for project in list_project_files_without_migration(paths)? {
-        let old_report = legacy_exports.join(format!("{}.xlsx", project_file_stem(&project)));
-        if !old_report.exists() {
+    for legacy_root in [
+        exe_dir.join("Данные Project Time Manager"),
+        exe_dir.join("Данные приложения"),
+    ] {
+        let legacy_exports = legacy_root.join("exports");
+        if !legacy_exports.exists() {
             continue;
         }
-        let new_report = project_report_path(paths, &project);
-        if !new_report.exists() {
-            if let Some(parent) = new_report.parent() {
-                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+
+        for project in list_project_files_without_migration(paths)? {
+            let old_report = legacy_exports.join(format!("{}.xlsx", project_file_stem(&project)));
+            if !old_report.exists() {
+                continue;
             }
-            let _ = fs::copy(old_report, new_report);
+            let new_report = project_report_path(paths, &project);
+            if !new_report.exists() {
+                if let Some(parent) = new_report.parent() {
+                    fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+                }
+                let _ = fs::copy(old_report, new_report);
+            }
         }
     }
 

@@ -1,76 +1,126 @@
 # Project Time Manager
 
-Desktop time tracker for Windows projects.
+[README on english](README.en.md)
 
-## Stack
+Project Time Manager — настольный тайм-трекер для Windows. Приложение помогает вести учет времени по проектам: вы выбираете проект, запускаете запись, а программа считает, какие приложения и браузерные домены были активны во время работы.
 
-- Tauri 2 + Rust backend
-- React + Vite + TypeScript frontend
-- Tailwind CSS UI
-- JSON project files stored beside the executable in `data/projects`
-- Excel export through `rust_xlsxwriter`
+![Скриншот Project Time Manager](docs/screenshot.png)
 
-## Current Scope
+## Что умеет приложение
 
-- Create and select projects.
-- Start, pause, and stop a tracking session.
-- Poll the active Windows foreground window every second.
-- Group browser processes as expandable rows with page/window titles as tab rows.
-- Toggle apps and tabs in or out of project totals.
-- Save project data as JSON.
-- Import project JSON through the UI.
-- Export Excel with `Dashboard`, `Apps`, `BrowserTabs`, and `Sessions` sheets.
+- Создавать, выбирать, переименовывать и удалять проекты.
+- Записывать рабочие сессии: старт, пауза, остановка.
+- Отслеживать активные окна Windows через WinAPI.
+- Показывать приложения с реальными иконками, временем и процентом от проекта.
+- Разворачивать браузеры до доменов и хранить список посещенных URL по каждому домену.
+- Включать и исключать приложения или домены из итогового времени без удаления реальных данных.
+- Экспортировать отчеты в Excel и PDF.
+- Хранить данные рядом с приложением в папке `data`.
+- Менять язык интерфейса: русский или английский.
+- Включать автозапуск в Windows.
 
-## Commands
+## Где лежат данные
+
+После установки рядом с исполняемым файлом создается папка:
+
+```text
+data/
+  workspace.json
+  Проекты/
+    <Название проекта>/
+      project.json
+      <Название проекта>.xlsx
+      <Название проекта>.pdf
+```
+
+Если проект переименовать, папка проекта и новые отчеты будут называться так же, как проект.
+
+## Как пользоваться
+
+1. Создайте проект в левом столбце или выберите существующий.
+2. Нажмите `Старт`.
+3. Работайте как обычно: монтаж, разработка, браузер, документы.
+4. При необходимости отключайте галочки у приложений или доменов, которые не должны попадать в итог.
+5. Нажмите `Пауза` или `Стоп`.
+6. Экспортируйте Excel или PDF отчет.
+
+Во время активной записи импорт и экспорт отключены, чтобы отчет не собирался из полузаписанных данных.
+
+## Для разработчиков
+
+### Стек
+
+- Tauri 2
+- Rust backend
+- React + TypeScript
+- Vite
+- Tailwind CSS
+- `rust_xlsxwriter` для Excel
+- `printpdf` для PDF
+- WinAPI через crate `windows`
+
+### Локальный запуск
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-Build:
+На macOS и Linux интерфейс откроется, но реальное отслеживание активных окон рассчитано только на Windows.
+
+### Сборка
+
+Обычная сборка для текущей ОС:
 
 ```bash
 npm run tauri:build
 ```
 
-Windows cross-build attempt from macOS:
-
-```bash
-brew install llvm nsis
-rustup target add x86_64-pc-windows-msvc
-cargo install --locked cargo-xwin
-npm run tauri:build:windows
-```
-
-The reliable release path is still to run `npm run tauri:build` on a Windows machine or Windows CI runner. The app is aimed at Windows. Non-Windows development builds can open the UI, but active-window tracking returns no samples.
-
-There is also a GitHub Actions workflow:
+Windows-сборка выполняется надежнее всего на Windows или через GitHub Actions:
 
 ```text
 .github/workflows/windows-build.yml
 ```
 
-Run it manually from GitHub Actions to get `project-time-manager-windows-exe` as an artifact.
+Workflow собирает NSIS-установщик и прикрепляет `project-time-manager.exe` к GitHub Release для тегов вида `v*`.
 
-## Data
-
-Runtime files are created next to the executable:
+### Структура
 
 ```text
-data/
-  workspace.json
-  projects/
-    <project-id>.json
-  exports/
-    <project-name>.xlsx
+src/
+  App.tsx              # основной React UI, локализация и управление состоянием
+  main.tsx             # точка входа frontend
+  index.css            # Tailwind и общие стили
+
+src-tauri/src/
+  main.rs              # Tauri commands, трекинг, настройки
+  storage.rs           # файловое хранение, миграции, проекты
+  windows.rs           # WinAPI: активное окно, процесс, URL/иконки
+  export.rs            # Excel
+  pdf.rs               # PDF
+  models.rs            # общие модели данных
+
+src-tauri/windows/
+  nsis-hooks.nsh       # хуки установщика и деинсталлятора
 ```
 
-This keeps the app close to a portable workflow. Tauri can produce a runnable `.exe` in the Windows release target directory; installer bundling is disabled for now because the goal is a direct launcher rather than an installer.
+### Релиз
 
-## Known Next Steps
+1. Обновите версии в `package.json`, `src-tauri/Cargo.toml` и `src-tauri/tauri.conf.json`.
+2. Проверьте сборку:
 
-- Real browser URL capture. Windows foreground-window APIs expose the tab/window title, not the URL. URL tracking needs a browser extension, browser remote debugging, or an accessibility/automation bridge.
-- Extract real Windows app icons instead of symbolic UI badges.
-- Add PDF export.
-- Add a proper portable `.exe` release script and CI job for Windows.
+```bash
+npm run build
+cd src-tauri
+cargo check
+cargo test
+```
+
+3. Создайте тег:
+
+```bash
+git tag v0.1.7
+git push origin develop --tags
+```
+
+4. GitHub Actions соберет Windows-установщик и создаст Release.
