@@ -163,6 +163,133 @@ fn toggle_tab_included(
 }
 
 #[tauri::command]
+fn toggle_url_included(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    app_key: String,
+    tab_key: String,
+    url: String,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let updated = toggle_url(&state.paths, &project_id, &app_key, &tab_key, &url, enabled)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn set_app_time(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    app_key: String,
+    seconds: u64,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::set_app_time(&state.paths, &project_id, &app_key, seconds)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn set_tab_time(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    app_key: String,
+    tab_key: String,
+    seconds: u64,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::set_tab_time(&state.paths, &project_id, &app_key, &tab_key, seconds)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn create_stage(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    name: String,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::create_stage(&state.paths, &project_id, &name)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn rename_stage(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+    name: String,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::rename_stage(&state.paths, &project_id, &stage_id, &name)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn delete_stage(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::delete_stage(&state.paths, &project_id, &stage_id)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn reorder_stage(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+    direction: i32,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::reorder_stage(&state.paths, &project_id, &stage_id, direction)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn toggle_stage_app_included(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+    app_key: String,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::toggle_stage_app(&state.paths, &project_id, &stage_id, &app_key, enabled)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn toggle_stage_tab_included(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+    app_key: String,
+    tab_key: String,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::toggle_stage_tab(&state.paths, &project_id, &stage_id, &app_key, &tab_key, enabled)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn toggle_stage_url_included(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    stage_id: String,
+    app_key: String,
+    tab_key: String,
+    url: String,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let updated = crate::storage::toggle_stage_url(&state.paths, &project_id, &stage_id, &app_key, &tab_key, &url, enabled)?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
+}
+
+#[tauri::command]
 fn rename_project(
     state: State<'_, AppRuntime>,
     project_id: String,
@@ -195,14 +322,18 @@ fn update_app_settings(
     language: String,
 ) -> Result<AppSettings, String> {
     let normalized = normalized_language(&language);
+    let previous_autostart;
     {
         let mut store = state.store.lock().map_err(|err| err.to_string())?;
+        previous_autostart = store.workspace.autostart;
         store.workspace.autostart = autostart;
         store.workspace.language = normalized.clone();
         save_workspace(&state.paths, &store.workspace)?;
     }
 
-    set_autostart_enabled(autostart)?;
+    if previous_autostart != autostart {
+        set_autostart_enabled(autostart)?;
+    }
     Ok(AppSettings {
         autostart,
         language: normalized,
@@ -371,33 +502,21 @@ fn normalized_language(language: &str) -> String {
 fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let exe = exe.to_string_lossy().to_string();
-        let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-        let name = "Project Time Manager";
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (run_key, _) = hkcu
+            .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+            .map_err(|err| err.to_string())?;
         if enabled {
-            let status = Command::new("reg")
-                .args([
-                    "add",
-                    key,
-                    "/v",
-                    name,
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    &format!("\"{}\"", exe),
-                    "/f",
-                ])
-                .status()
+            run_key
+                .set_value("Project Time Manager", &format!("\"{}\"", exe))
                 .map_err(|err| err.to_string())?;
-            if !status.success() {
-                return Err("Не удалось включить автозапуск.".to_string());
-            }
         } else {
-            let _ = Command::new("reg")
-                .args(["delete", key, "/v", name, "/f"])
-                .status()
-                .map_err(|err| err.to_string())?;
+            let _ = run_key.delete_value("Project Time Manager");
         }
     }
 
@@ -537,8 +656,18 @@ fn main() {
             stop_tracking,
             toggle_app_included,
             toggle_tab_included,
+            toggle_url_included,
+            set_app_time,
+            set_tab_time,
             rename_project,
             delete_project,
+            create_stage,
+            rename_stage,
+            delete_stage,
+            reorder_stage,
+            toggle_stage_app_included,
+            toggle_stage_tab_included,
+            toggle_stage_url_included,
             update_app_settings,
             import_project_json,
             export_selected_project_xlsx,

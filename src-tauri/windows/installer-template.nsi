@@ -413,14 +413,14 @@ Function FinishShow
   System::Call "user32::GetDpiForWindow(p r1) i .r2"
   ${If} $(^RTL) = 1
     StrCpy $3 "${__NSD_CheckBox_EXSTYLE} | ${WS_EX_LAYOUTRTL}"
-    IntOp $4 50 * $2
+    IntOp $4 34 * $2
   ${Else}
     StrCpy $3 "${__NSD_CheckBox_EXSTYLE}"
-    IntOp $4 120 * $2
+    IntOp $4 18 * $2
   ${EndIf}
-  IntOp $5 143 * $2
-  IntOp $6 280 * $2
-  IntOp $7 18 * $2
+  IntOp $5 112 * $2
+  IntOp $6 350 * $2
+  IntOp $7 22 * $2
   IntOp $4 $4 / 96
   IntOp $5 $5 / 96
   IntOp $6 $6 / 96
@@ -429,12 +429,14 @@ Function FinishShow
   Pop $DeleteInstallerCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteInstallerCheckbox ${WM_SETFONT} $1 1
+  BringWindowToTop $DeleteInstallerCheckbox
+  ShowWindow $DeleteInstallerCheckbox ${SW_SHOW}
 FunctionEnd
 
 Function FinishLeave
   SendMessage $DeleteInstallerCheckbox ${BM_GETCHECK} 0 0 $DeleteInstallerCheckboxState
   ${If} $DeleteInstallerCheckboxState == ${BST_CHECKED}
-    ExecShell "" "$SYSDIR\cmd.exe" '/C ping 127.0.0.1 -n 3 > nul & del /F /Q "$EXEPATH"' SW_HIDE
+    ExecShell "" "$SYSDIR\cmd.exe" '/C ping 127.0.0.1 -n 8 > nul & rmdir /S /Q "$INSTDIR" & del /F /Q "$EXEPATH"' SW_HIDE
   ${EndIf}
 FunctionEnd
 
@@ -835,7 +837,7 @@ Section Uninstall
   {{#each resources_ancestors}}
   RMDir /REBOOTOK "$INSTDIR\\{{this}}"
   {{/each}}
-  RMDir "$INSTDIR"
+  RMDir /r /REBOOTOK "$INSTDIR"
 
   ; Remove shortcuts if not updating
   ${If} $UpdateMode <> 1

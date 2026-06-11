@@ -1,4 +1,4 @@
-use crate::models::{AppUsageRecord, ProjectRecord};
+use crate::models::{AppUsageRecord, ProjectRecord, ProjectStageRecord, TabUsageRecord};
 use printpdf::{Base64OrRaw, GeneratePdfOptions, PdfDocument, PdfSaveOptions, PdfWarnMsg};
 use std::collections::BTreeMap;
 use std::fs;
@@ -15,8 +15,9 @@ pub fn export_project_pdf(
     let (font_bytes, _) = load_font_bytes()?;
     let apps = included_apps(project);
     let tabs = included_tabs(project);
+    let stages = included_stages(project);
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
-    let html = build_report_html(project, &apps, &tabs, total_seconds);
+    let html = build_report_html(project, &apps, &tabs, &stages, total_seconds);
     let mut fonts = BTreeMap::new();
     fonts.insert("ReportFont".to_string(), Base64OrRaw::Raw(font_bytes));
 
@@ -48,6 +49,7 @@ fn build_report_html(
     project: &ProjectRecord,
     apps: &[IncludedApp],
     tabs: &[IncludedTab],
+    stages: &[IncludedStage],
     total_seconds: u64,
 ) -> String {
     let mut pages = Vec::new();
@@ -55,6 +57,9 @@ fn build_report_html(
     pages.extend(app_pages(apps, total_seconds));
     pages.extend(tab_pages(tabs, total_seconds));
     pages.extend(session_pages(project));
+    if !stages.is_empty() {
+        pages.extend(stage_pages(stages));
+    }
 
     format!(
         r#"<!DOCTYPE html>
@@ -289,10 +294,6 @@ fn overview_page(
     {info_apps}
     {info_tabs}
   </div>
-</div>
-<div class="panel">
-  <h2>Распределение по приложениям</h2>
-  {app_bars}
 </div>"#,
             project_name = escape_html(&project.name),
             metric_total = metric_card("Всего по проекту", &format_duration(total_seconds)),
@@ -303,10 +304,6 @@ fn overview_page(
             info_last = info_tile("Последняя сессия", last_session),
             info_apps = info_tile("Приложений", &apps.len().to_string()),
             info_tabs = info_tile("Доменов", &tabs.len().to_string()),
-            app_bars = bars_html(
-                apps.iter().take(7).map(|app| (&app.name, app.seconds)),
-                total_seconds
-            ),
         ),
     )
 }
@@ -461,28 +458,6 @@ fn info_tile(label: &str, value: &str) -> String {
     )
 }
 
-fn bars_html<'a>(items: impl Iterator<Item = (&'a String, u64)>, total_seconds: u64) -> String {
-    let mut output = String::new();
-    for (label, seconds) in items {
-        let width = if total_seconds == 0 {
-            0.0
-        } else {
-            (seconds as f64 / total_seconds as f64 * 100.0).clamp(4.0, 100.0)
-        };
-        output.push_str(&format!(
-            r#"<div class="bar-row"><div class="bar-label">{}</div><div class="bar-track"><div class="bar-fill" style="width:{:.1}%"></div></div><span>{}</span></div>"#,
-            escape_html(label),
-            width,
-            format_duration(seconds)
-        ));
-    }
-    if output.is_empty() {
-        empty_html()
-    } else {
-        output
-    }
-}
-
 fn simple_table(headers: &[(&str, &str)], rows: &[Vec<String>]) -> String {
     if rows.is_empty() {
         return empty_html();
@@ -553,6 +528,17 @@ struct IncludedTab {
     seconds: u64,
 }
 
+#[derive(Clone)]
+struct IncludedStage {
+    name: String,
+    created_at: String,
+    updated_at: String,
+    seconds: u64,
+    app_count: usize,
+    tab_count: usize,
+    apps: String,
+}
+
 fn included_apps(project: &ProjectRecord) -> Vec<IncludedApp> {
     let mut apps = project
         .apps
@@ -580,7 +566,8 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
         .filter(|app| app.enabled)
         .flat_map(|app| {
             app.tabs.iter().filter_map(|tab| {
-                if !tab.enabled || tab.time_seconds == 0 {
+                let seconds = included_tab_seconds(tab);
+                if !tab.enabled || seconds == 0 {
                     return None;
                 }
                 let url_count = if tab.urls.is_empty() {
@@ -592,7 +579,7 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
                     browser: app.name.clone(),
                     title: tab.title.clone(),
                     url_count,
-                    seconds: tab.time_seconds,
+                    seconds,
                 })
             })
         })
@@ -610,10 +597,142 @@ fn included_app_seconds(app: &AppUsageRecord) -> u64 {
             .tabs
             .iter()
             .filter(|tab| tab.enabled)
-            .map(|tab| tab.time_seconds)
+            .map(included_tab_seconds)
             .sum();
     }
     app.time_seconds
+}
+
+fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
+    let mut stages = project
+        .stages
+        .iter()
+        .map(|stage| {
+            let seconds = project
+                .apps
+                .iter()
+                .map(|app| included_stage_app_seconds(stage, app))
+                .sum();
+            let app_names = project
+                .apps
+                .iter()
+                .filter(|app| stage_app_enabled(stage, app))
+                .map(|app| app.name.clone())
+                .collect::<Vec<_>>();
+            let app_count = app_names.len();
+            let tab_count = project
+                .apps
+                .iter()
+                .filter(|app| stage_app_enabled(stage, app))
+                .flat_map(|app| app.tabs.iter().filter(|tab| stage_tab_enabled(stage, app, tab)))
+                .count();
+            IncludedStage {
+                name: stage.name.clone(),
+                created_at: stage.created_at.clone(),
+                updated_at: stage.updated_at.clone(),
+                seconds,
+                app_count,
+                tab_count,
+                apps: app_names.join(", "),
+            }
+        })
+        .collect::<Vec<_>>();
+    stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
+    stages
+}
+
+fn stage_pages(stages: &[IncludedStage]) -> Vec<String> {
+    if stages.is_empty() {
+        return vec![];
+    }
+
+    stages
+        .chunks(8)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let suffix = if index == 0 { "" } else { " продолжение" };
+            page(
+                &format!("Этапы{suffix}"),
+                &simple_table(
+                    &[
+                        ("Название", "20%"),
+                        ("Создан", "16%"),
+                        ("Обновлен", "16%"),
+                        ("Время", "14%"),
+                        ("Приложений", "12%"),
+                        ("Вкладок", "12%"),
+                        ("Приложения", "10%"),
+                    ],
+                    &chunk
+                        .iter()
+                        .map(|stage| {
+                            vec![
+                                escape_html(&stage.name),
+                                escape_html(&stage.created_at),
+                                escape_html(&stage.updated_at),
+                                format_duration(stage.seconds),
+                                stage.app_count.to_string(),
+                                stage.tab_count.to_string(),
+                                escape_html(&stage.apps),
+                            ]
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn stage_app_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord) -> bool {
+    if !app.enabled {
+        return false;
+    }
+    stage
+        .apps
+        .iter()
+        .find(|item| item.app_key == app.key)
+        .map(|item| item.enabled)
+        .unwrap_or(true)
+}
+
+fn stage_tab_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord, tab: &TabUsageRecord) -> bool {
+    if !stage_app_enabled(stage, app) || !tab.enabled {
+        return false;
+    }
+    stage
+        .apps
+        .iter()
+        .find(|item| item.app_key == app.key)
+        .and_then(|item| item.tabs.iter().find(|tab_state| tab_state.tab_key == tab.key))
+        .map(|item| item.enabled)
+        .unwrap_or(true)
+}
+
+fn included_stage_app_seconds(stage: &ProjectStageRecord, app: &AppUsageRecord) -> u64 {
+    if !stage_app_enabled(stage, app) {
+        return 0;
+    }
+    if app.kind == "browser" {
+        app.tabs
+            .iter()
+            .filter(|tab| stage_tab_enabled(stage, app, tab))
+            .map(included_tab_seconds)
+            .sum()
+    } else {
+        app.time_seconds
+    }
+}
+
+fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {
+    if tab.urls.is_empty() {
+        return tab.time_seconds;
+    }
+    tab
+        .urls
+        .iter()
+        .filter(|item| item.enabled)
+        .map(|item| item.time_seconds)
+        .sum::<u64>()
 }
 
 fn app_kind_label(kind: &str) -> &str {

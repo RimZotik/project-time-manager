@@ -41,6 +41,8 @@ pub struct ProjectRecord {
     pub updated_at: String,
     pub sessions: Vec<SessionRecord>,
     pub apps: Vec<AppUsageRecord>,
+    #[serde(default)]
+    pub stages: Vec<ProjectStageRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -77,6 +79,46 @@ pub struct VisitedUrlRecord {
     pub title: String,
     pub last_seen_at: String,
     pub hits: u64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub time_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectStageRecord {
+    pub id: String,
+    pub name: String,
+    pub order: usize,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub apps: Vec<StageAppRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StageAppRecord {
+    pub app_key: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub tabs: Vec<StageTabRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StageTabRecord {
+    pub tab_key: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub urls: Vec<StageUrlRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StageUrlRecord {
+    pub url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -110,4 +152,8 @@ impl ProjectRecord {
             updated_at: self.updated_at.clone(),
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }

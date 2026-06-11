@@ -1,4 +1,4 @@
-use crate::models::{AppUsageRecord, ProjectRecord};
+use crate::models::{AppUsageRecord, ProjectRecord, ProjectStageRecord, TabUsageRecord};
 use rust_xlsxwriter::{
     Chart, ChartType, Color, Format, FormatAlign, FormatBorder, Workbook, XlsxError,
 };
@@ -12,11 +12,15 @@ pub fn export_project_xlsx(
     let styles = ReportStyles::new();
     let apps = included_apps(project);
     let tabs = included_tabs(project);
+    let stages = included_stages(project);
 
-    write_report_sheet(&mut workbook, project, &apps, &tabs, &styles)?;
+    write_report_sheet(&mut workbook, project, &apps, &tabs, &stages, &styles)?;
     write_apps_sheet(&mut workbook, &apps, &styles)?;
     write_tabs_sheet(&mut workbook, &tabs, &styles)?;
     write_sessions_sheet(&mut workbook, project, &styles)?;
+    if !stages.is_empty() {
+        write_stages_sheet(&mut workbook, &stages, &styles)?;
+    }
 
     workbook.save(&output_path).map_err(format_xlsx_error)?;
     Ok(output_path)
@@ -49,6 +53,16 @@ struct IncludedTab {
     url: Option<String>,
     url_count: usize,
     seconds: u64,
+}
+
+#[derive(Clone)]
+struct IncludedStage {
+    name: String,
+    created_at: String,
+    updated_at: String,
+    seconds: u64,
+    app_count: usize,
+    tab_count: usize,
 }
 
 impl ReportStyles {
@@ -103,6 +117,7 @@ fn write_report_sheet(
     project: &ProjectRecord,
     apps: &[IncludedApp],
     tabs: &[IncludedTab],
+    stages: &[IncludedStage],
     styles: &ReportStyles,
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
@@ -143,6 +158,12 @@ fn write_report_sheet(
         .map_err(format_xlsx_error)?;
     worksheet
         .set_column_width(13, 12)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(15, 24)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(16, 12)
         .map_err(format_xlsx_error)?;
 
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
@@ -258,34 +279,33 @@ fn write_report_sheet(
     worksheet
         .write_string_with_format(7, 13, "Часы", &styles.header)
         .map_err(format_xlsx_error)?;
-
-    if !apps.is_empty() {
-        let last_row = 8 + apps.len().min(8) as u32 - 1;
-        let mut chart = Chart::new(ChartType::Pie);
-        chart.title().set_name("Распределение по приложениям");
+    if !stages.is_empty() {
+        worksheet
+            .write_string_with_format(7, 15, "Этапы", &styles.header)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(7, 16, "Часы", &styles.header)
+            .map_err(format_xlsx_error)?;
+        for (index, stage) in stages.iter().take(8).enumerate() {
+            let row = 8 + index as u32;
+            worksheet
+                .write_string_with_format(row, 15, &stage.name, &styles.text)
+                .map_err(format_xlsx_error)?;
+            worksheet
+                .write_number_with_format(row, 16, seconds_to_hours(stage.seconds), &styles.number)
+                .map_err(format_xlsx_error)?;
+        }
+        let last_row = 8 + stages.len().min(8) as u32 - 1;
+        let mut chart = Chart::new(ChartType::Bar);
+        chart.title().set_name("Этапы проекта");
         chart.set_style(10);
         chart
             .add_series()
-            .set_name("Приложения")
-            .set_categories(("Отчет", 8, 9, last_row, 9))
-            .set_values(("Отчет", 8, 10, last_row, 10));
+            .set_name("Этапы")
+            .set_categories(("Отчет", 8, 15, last_row, 15))
+            .set_values(("Отчет", 8, 16, last_row, 16));
         worksheet
-            .insert_chart(20, 0, &chart)
-            .map_err(format_xlsx_error)?;
-    }
-
-    if !tabs.is_empty() {
-        let last_row = 8 + tabs.len().min(8) as u32 - 1;
-        let mut chart = Chart::new(ChartType::Column);
-        chart.title().set_name("Время по доменам");
-        chart.set_style(11);
-        chart
-            .add_series()
-            .set_name("Домены")
-            .set_categories(("Отчет", 8, 12, last_row, 12))
-            .set_values(("Отчет", 8, 13, last_row, 13));
-        worksheet
-            .insert_chart(20, 4, &chart)
+            .insert_chart(20, 8, &chart)
             .map_err(format_xlsx_error)?;
     }
 
@@ -516,6 +536,71 @@ fn write_sessions_sheet(
     Ok(())
 }
 
+fn write_stages_sheet(
+    workbook: &mut Workbook,
+    stages: &[IncludedStage],
+    styles: &ReportStyles,
+) -> Result<(), String> {
+    let worksheet = workbook.add_worksheet();
+    worksheet.set_name("Этапы").map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(0, 24)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(1, 20)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(2, 20)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(3, 14)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(4, 14)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(5, 14)
+        .map_err(format_xlsx_error)?;
+
+    write_small_table_header(
+        worksheet,
+        0,
+        0,
+        &["Название", "Создан", "Обновлен", "Время", "Приложений", "Вкладок"],
+        styles,
+    )?;
+
+    for (index, stage) in stages.iter().enumerate() {
+        let row = (index + 1) as u32;
+        worksheet
+            .write_string_with_format(row, 0, &stage.name, &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(row, 1, &stage.created_at, &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(row, 2, &stage.updated_at, &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(row, 3, &format_duration(stage.seconds), &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 4, stage.app_count as f64, &styles.number)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 5, stage.tab_count as f64, &styles.number)
+            .map_err(format_xlsx_error)?;
+    }
+
+    if !stages.is_empty() {
+        worksheet
+            .autofilter(0, 0, stages.len() as u32, 5)
+            .map_err(format_xlsx_error)?;
+    }
+
+    Ok(())
+}
+
 fn write_metric(
     worksheet: &mut rust_xlsxwriter::Worksheet,
     row: u32,
@@ -593,7 +678,8 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
         .filter(|app| app.enabled)
         .flat_map(|app| {
             app.tabs.iter().filter_map(|tab| {
-                if !tab.enabled || tab.time_seconds == 0 {
+                let seconds = included_tab_seconds(tab);
+                if !tab.enabled || seconds == 0 {
                     return None;
                 }
                 Some(IncludedTab {
@@ -605,13 +691,48 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
                     } else {
                         tab.urls.len()
                     },
-                    seconds: tab.time_seconds,
+                    seconds,
                 })
             })
         })
         .collect::<Vec<_>>();
     tabs.sort_by(|left, right| right.seconds.cmp(&left.seconds));
     tabs
+}
+
+fn included_stages(project: &ProjectRecord) -> Vec<IncludedStage> {
+    let mut stages = project
+        .stages
+        .iter()
+        .map(|stage| {
+            let seconds = project
+                .apps
+                .iter()
+                .map(|app| included_stage_app_seconds(stage, app))
+                .sum();
+            let app_count = project
+                .apps
+                .iter()
+                .filter(|app| stage_app_enabled(stage, app))
+                .count();
+            let tab_count = project
+                .apps
+                .iter()
+                .filter(|app| stage_app_enabled(stage, app))
+                .flat_map(|app| app.tabs.iter().filter(|tab| stage_tab_enabled(stage, app, tab)))
+                .count();
+            IncludedStage {
+                name: stage.name.clone(),
+                created_at: stage.created_at.clone(),
+                updated_at: stage.updated_at.clone(),
+                seconds,
+                app_count,
+                tab_count,
+            }
+        })
+        .collect::<Vec<_>>();
+    stages.sort_by(|left, right| right.seconds.cmp(&left.seconds).then(left.name.cmp(&right.name)));
+    stages
 }
 
 fn included_app_seconds(app: &AppUsageRecord) -> u64 {
@@ -623,10 +744,62 @@ fn included_app_seconds(app: &AppUsageRecord) -> u64 {
             .tabs
             .iter()
             .filter(|tab| tab.enabled)
-            .map(|tab| tab.time_seconds)
+            .map(included_tab_seconds)
             .sum();
     }
     app.time_seconds
+}
+
+fn stage_app_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord) -> bool {
+    if !app.enabled {
+        return false;
+    }
+    stage
+        .apps
+        .iter()
+        .find(|item| item.app_key == app.key)
+        .map(|item| item.enabled)
+        .unwrap_or(true)
+}
+
+fn stage_tab_enabled(stage: &ProjectStageRecord, app: &AppUsageRecord, tab: &TabUsageRecord) -> bool {
+    if !stage_app_enabled(stage, app) || !tab.enabled {
+        return false;
+    }
+    stage
+        .apps
+        .iter()
+        .find(|item| item.app_key == app.key)
+        .and_then(|item| item.tabs.iter().find(|item| item.tab_key == tab.key))
+        .map(|item| item.enabled)
+        .unwrap_or(true)
+}
+
+fn included_stage_app_seconds(stage: &ProjectStageRecord, app: &AppUsageRecord) -> u64 {
+    if !stage_app_enabled(stage, app) {
+        return 0;
+    }
+    if app.kind == "browser" {
+        app.tabs
+            .iter()
+            .filter(|tab| stage_tab_enabled(stage, app, tab))
+            .map(included_tab_seconds)
+            .sum()
+    } else {
+        app.time_seconds
+    }
+}
+
+fn included_tab_seconds(tab: &TabUsageRecord) -> u64 {
+    if tab.urls.is_empty() {
+        return tab.time_seconds;
+    }
+    tab
+        .urls
+        .iter()
+        .filter(|item| item.enabled)
+        .map(|item| item.time_seconds)
+        .sum::<u64>()
 }
 
 fn app_kind_label(kind: &str) -> &str {

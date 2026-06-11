@@ -96,12 +96,16 @@ pub fn list_project_files(paths: &StoragePaths) -> Result<Vec<ProjectRecord>, St
             if project_file.exists() {
                 let content = fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
                 if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                    let mut project = project;
+                    normalize_project_structure(&mut project);
                     projects.push(project);
                 }
             }
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
             let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
             if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                let mut project = project;
+                normalize_project_structure(&mut project);
                 projects.push(project);
             }
         }
@@ -270,7 +274,9 @@ pub fn delete_project_record(paths: &StoragePaths, project_id: &str) -> Result<(
 pub fn load_project(paths: &StoragePaths, project_id: &str) -> Result<ProjectRecord, String> {
     let path = project_path_by_id(paths, project_id)?;
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
-    serde_json::from_str(&content).map_err(|err| err.to_string())
+    let mut project: ProjectRecord = serde_json::from_str(&content).map_err(|err| err.to_string())?;
+    normalize_project_structure(&mut project);
+    Ok(project)
 }
 
 pub fn create_project(
@@ -278,7 +284,7 @@ pub fn create_project(
     name: &str,
     _client: &str,
 ) -> Result<ProjectRecord, String> {
-    let project = ProjectRecord {
+    let mut project = ProjectRecord {
         id: Uuid::new_v4().to_string(),
         name: name.trim().to_string(),
         client: String::new(),
@@ -287,7 +293,9 @@ pub fn create_project(
         updated_at: now_iso(),
         sessions: Vec::new(),
         apps: Vec::new(),
+        stages: Vec::new(),
     };
+    normalize_project_structure(&mut project);
     save_project(paths, &project)?;
     Ok(project)
 }
@@ -305,6 +313,7 @@ pub fn import_project_from_json(
         project.created_at = now_iso();
     }
     project.updated_at = now_iso();
+    normalize_project_structure(&mut project);
     save_project(paths, &project)?;
     Ok(project)
 }
@@ -319,6 +328,7 @@ pub fn toggle_app(
     if let Some(app) = project.apps.iter_mut().find(|item| item.key == app_key) {
         app.enabled = enabled;
         project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
         save_project(paths, &project)?;
     }
     Ok(project)
@@ -336,6 +346,7 @@ pub fn toggle_tab(
         if let Some(tab) = app.tabs.iter_mut().find(|item| item.key == tab_key) {
             tab.enabled = enabled;
             project.updated_at = now_iso();
+            normalize_project_structure(&mut project);
             save_project(paths, &project)?;
         }
     }
@@ -473,6 +484,7 @@ fn touch_url_history(tab: &mut TabUsageRecord, url: &str, title: &str) {
     if let Some(entry) = tab.urls.iter_mut().find(|item| item.url == url) {
         entry.hits = entry.hits.saturating_add(1);
         entry.last_seen_at = now;
+        entry.time_seconds = entry.time_seconds.saturating_add(1);
         if !clean_title.is_empty() {
             entry.title = clean_title.to_string();
         }
@@ -488,7 +500,409 @@ fn touch_url_history(tab: &mut TabUsageRecord, url: &str, title: &str) {
         },
         last_seen_at: now,
         hits: 1,
+        enabled: true,
+        time_seconds: 1,
     });
+}
+
+pub fn set_app_time(
+    paths: &StoragePaths,
+    project_id: &str,
+    app_key: &str,
+    seconds: u64,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    if let Some(app) = project.apps.iter_mut().find(|item| item.key == app_key) {
+        set_app_time_in_app(app, seconds);
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn set_tab_time(
+    paths: &StoragePaths,
+    project_id: &str,
+    app_key: &str,
+    tab_key: &str,
+    seconds: u64,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    if let Some(app) = project.apps.iter_mut().find(|item| item.key == app_key) {
+        if let Some(tab) = app.tabs.iter_mut().find(|item| item.key == tab_key) {
+            set_tab_time_in_project(tab, seconds);
+            if app.kind == "browser" {
+                app.time_seconds = app.tabs.iter().map(|item| item.time_seconds).sum();
+            }
+            project.updated_at = now_iso();
+            normalize_project_structure(&mut project);
+            save_project(paths, &project)?;
+        }
+    }
+    Ok(project)
+}
+
+pub fn toggle_url(
+    paths: &StoragePaths,
+    project_id: &str,
+    app_key: &str,
+    tab_key: &str,
+    url: &str,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    if let Some(app) = project.apps.iter_mut().find(|item| item.key == app_key) {
+        if let Some(tab) = app.tabs.iter_mut().find(|item| item.key == tab_key) {
+            if let Some(item) = tab.urls.iter_mut().find(|item| item.url == url) {
+                item.enabled = enabled;
+                project.updated_at = now_iso();
+                normalize_project_structure(&mut project);
+                save_project(paths, &project)?;
+            }
+        }
+    }
+    Ok(project)
+}
+
+pub fn create_stage(paths: &StoragePaths, project_id: &str, name: &str) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Название этапа не может быть пустым.".to_string());
+    }
+    project.stages.push(ProjectStageRecord {
+        id: Uuid::new_v4().to_string(),
+        name: trimmed.to_string(),
+        order: project.stages.len(),
+        created_at: now_iso(),
+        updated_at: now_iso(),
+        apps: Vec::new(),
+    });
+    project.updated_at = now_iso();
+    normalize_project_structure(&mut project);
+    save_project(paths, &project)?;
+    Ok(project)
+}
+
+pub fn rename_stage(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+    name: &str,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Название этапа не может быть пустым.".to_string());
+    }
+    if let Some(stage) = project.stages.iter_mut().find(|item| item.id == stage_id) {
+        stage.name = trimmed.to_string();
+        stage.updated_at = now_iso();
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn delete_stage(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    project.stages.retain(|stage| stage.id != stage_id);
+    for (index, stage) in project.stages.iter_mut().enumerate() {
+        stage.order = index;
+        stage.updated_at = now_iso();
+    }
+    project.updated_at = now_iso();
+    normalize_project_structure(&mut project);
+    save_project(paths, &project)?;
+    Ok(project)
+}
+
+pub fn reorder_stage(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+    direction: i32,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let Some(index) = project.stages.iter().position(|item| item.id == stage_id) else {
+        return Ok(project);
+    };
+
+    let new_index = if direction < 0 {
+        index.saturating_sub(1)
+    } else if direction > 0 {
+        (index + 1).min(project.stages.len().saturating_sub(1))
+    } else {
+        index
+    };
+
+    if new_index != index {
+        project.stages.swap(index, new_index);
+        for (order, stage) in project.stages.iter_mut().enumerate() {
+            stage.order = order;
+            stage.updated_at = now_iso();
+        }
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn toggle_stage_app(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+    app_key: &str,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let global_enabled = project
+        .apps
+        .iter()
+        .find(|item| item.key == app_key)
+        .map(|app| app.enabled)
+        .unwrap_or(false);
+    if let Some(stage) = project.stages.iter_mut().find(|item| item.id == stage_id) {
+        let app = ensure_stage_app(stage, app_key);
+        app.enabled = enabled && global_enabled;
+        stage.updated_at = now_iso();
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn toggle_stage_tab(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+    app_key: &str,
+    tab_key: &str,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let global_enabled = project
+        .apps
+        .iter()
+        .find(|item| item.key == app_key)
+        .and_then(|app| app.tabs.iter().find(|item| item.key == tab_key))
+        .map(|tab| tab.enabled)
+        .unwrap_or(false);
+    if let Some(stage) = project.stages.iter_mut().find(|item| item.id == stage_id) {
+        let app = ensure_stage_app(stage, app_key);
+        let tab = ensure_stage_tab(app, tab_key);
+        tab.enabled = enabled && global_enabled;
+        stage.updated_at = now_iso();
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn toggle_stage_url(
+    paths: &StoragePaths,
+    project_id: &str,
+    stage_id: &str,
+    app_key: &str,
+    tab_key: &str,
+    url: &str,
+    enabled: bool,
+) -> Result<ProjectRecord, String> {
+    let mut project = load_project(paths, project_id)?;
+    let global_enabled = project
+        .apps
+        .iter()
+        .find(|item| item.key == app_key)
+        .and_then(|app| app.tabs.iter().find(|item| item.key == tab_key))
+        .and_then(|tab| tab.urls.iter().find(|item| item.url == url))
+        .map(|link| link.enabled)
+        .unwrap_or(false);
+    if let Some(stage) = project.stages.iter_mut().find(|item| item.id == stage_id) {
+        let app = ensure_stage_app(stage, app_key);
+        let tab = ensure_stage_tab(app, tab_key);
+        let link = ensure_stage_url(tab, url);
+        link.enabled = enabled && global_enabled;
+        stage.updated_at = now_iso();
+        project.updated_at = now_iso();
+        normalize_project_structure(&mut project);
+        save_project(paths, &project)?;
+    }
+    Ok(project)
+}
+
+pub fn normalize_project_structure(project: &mut ProjectRecord) {
+    for app in &mut project.apps {
+        for tab in &mut app.tabs {
+            if tab.urls.is_empty() {
+                continue;
+            }
+            for url in &mut tab.urls {
+                if url.url.trim().is_empty() {
+                    url.url = url.title.clone();
+                }
+                if url.title.trim().is_empty() {
+                    url.title = url.url.clone();
+                }
+            }
+        }
+    }
+
+    project
+        .stages
+        .sort_by(|left, right| left.order.cmp(&right.order).then(left.created_at.cmp(&right.created_at)));
+    let project_apps = project.apps.clone();
+    for (index, stage) in project.stages.iter_mut().enumerate() {
+        stage.order = index;
+        sync_stage_layout(stage, &project_apps);
+    }
+}
+
+fn sync_stage_layout(stage: &mut ProjectStageRecord, apps: &[AppUsageRecord]) {
+    stage.apps.retain(|item| apps.iter().any(|app| app.key == item.app_key));
+
+    for app in apps {
+        let stage_app = ensure_stage_app(stage, &app.key);
+        if !app.enabled {
+            stage_app.enabled = false;
+        }
+        stage_app.tabs.retain(|item| app.tabs.iter().any(|tab| tab.key == item.tab_key));
+        for tab in &app.tabs {
+            let stage_tab = ensure_stage_tab(stage_app, &tab.key);
+            if !tab.enabled {
+                stage_tab.enabled = false;
+            }
+            stage_tab.urls.retain(|item| tab.urls.iter().any(|url| url.url == item.url));
+            for url in &tab.urls {
+                let stage_url = ensure_stage_url(stage_tab, &url.url);
+                if !url.enabled {
+                    stage_url.enabled = false;
+                }
+            }
+        }
+    }
+}
+
+fn ensure_stage_app<'a>(
+    stage: &'a mut ProjectStageRecord,
+    app_key: &str,
+) -> &'a mut StageAppRecord {
+    if let Some(index) = stage.apps.iter().position(|item| item.app_key == app_key) {
+        return stage.apps.get_mut(index).expect("stage app exists");
+    }
+    stage.apps.push(StageAppRecord {
+        app_key: app_key.to_string(),
+        enabled: true,
+        tabs: Vec::new(),
+    });
+    stage.apps.last_mut().expect("stage app inserted")
+}
+
+fn ensure_stage_tab<'a>(app: &'a mut StageAppRecord, tab_key: &str) -> &'a mut StageTabRecord {
+    if let Some(index) = app.tabs.iter().position(|item| item.tab_key == tab_key) {
+        return app.tabs.get_mut(index).expect("stage tab exists");
+    }
+    app.tabs.push(StageTabRecord {
+        tab_key: tab_key.to_string(),
+        enabled: true,
+        urls: Vec::new(),
+    });
+    app.tabs.last_mut().expect("stage tab inserted")
+}
+
+fn ensure_stage_url<'a>(tab: &'a mut StageTabRecord, url: &str) -> &'a mut StageUrlRecord {
+    if let Some(index) = tab.urls.iter().position(|item| item.url == url) {
+        return tab.urls.get_mut(index).expect("stage url exists");
+    }
+    tab.urls.push(StageUrlRecord {
+        url: url.to_string(),
+        enabled: true,
+    });
+    tab.urls.last_mut().expect("stage url inserted")
+}
+
+fn set_app_time_in_app(app: &mut AppUsageRecord, seconds: u64) {
+    app.time_seconds = seconds;
+    if app.kind == "browser" {
+        let total = app.tabs.iter().map(|tab| tab.time_seconds).sum::<u64>();
+        if total == 0 {
+            let tab_count = app.tabs.len() as u64;
+            if tab_count > 0 {
+                let base = seconds / tab_count;
+                let mut remainder = seconds % tab_count;
+                for tab in &mut app.tabs {
+                    let value = base + u64::from(remainder > 0);
+                    tab.time_seconds = value;
+                    redistribute_url_times(tab, value);
+                    if remainder > 0 {
+                        remainder -= 1;
+                    }
+                }
+            }
+        } else {
+            let mut assigned = 0u64;
+            let last_index = app.tabs.len().saturating_sub(1);
+            for (index, tab) in app.tabs.iter_mut().enumerate() {
+                let value = if index == last_index {
+                    seconds.saturating_sub(assigned)
+                } else {
+                    ((tab.time_seconds as f64 / total as f64) * seconds as f64).round() as u64
+                };
+                tab.time_seconds = value;
+                redistribute_url_times(tab, value);
+                assigned = assigned.saturating_add(value);
+            }
+        }
+    }
+}
+
+fn set_tab_time_in_project(tab: &mut TabUsageRecord, seconds: u64) {
+    tab.time_seconds = seconds;
+    redistribute_url_times(tab, seconds);
+}
+
+fn redistribute_url_times(tab: &mut TabUsageRecord, seconds: u64) {
+    if tab.urls.is_empty() {
+        return;
+    }
+
+    let total = tab.urls.iter().map(|url| url.time_seconds).sum::<u64>();
+    if total == 0 {
+        let url_count = tab.urls.len() as u64;
+        if url_count == 0 {
+            return;
+        }
+        let base = seconds / url_count;
+        let mut remainder = seconds % url_count;
+        for item in &mut tab.urls {
+            let value = base + u64::from(remainder > 0);
+            item.time_seconds = value;
+            if remainder > 0 {
+                remainder -= 1;
+            }
+        }
+        return;
+    }
+
+    let mut assigned = 0u64;
+    let last_index = tab.urls.len().saturating_sub(1);
+    for (index, item) in tab.urls.iter_mut().enumerate() {
+        let value = if index == last_index {
+            seconds.saturating_sub(assigned)
+        } else {
+            ((item.time_seconds as f64 / total as f64) * seconds as f64).round() as u64
+        };
+        item.time_seconds = value;
+        assigned = assigned.saturating_add(value);
+    }
 }
 
 fn extract_domain(url: &str) -> Option<String> {
@@ -654,6 +1068,8 @@ fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
                     let content =
                         fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
                     if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                        let mut project = project;
+                        normalize_project_structure(&mut project);
                         let target = project_path(paths, &project);
                         if !target.exists() {
                             write_text_file(&target, &content)?;
@@ -662,6 +1078,8 @@ fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
                 } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                     let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
                     if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                        let mut project = project;
+                        normalize_project_structure(&mut project);
                         let target = project_path(paths, &project);
                         if !target.exists() {
                             write_text_file(&target, &content)?;
@@ -684,6 +1102,8 @@ fn migrate_flat_project_files(paths: &StoragePaths) -> Result<(), String> {
 
         let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
         if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+            let mut project = project;
+            normalize_project_structure(&mut project);
             let target = project_path(paths, &project);
             if !target.exists() {
                 write_text_file(&target, &content)?;

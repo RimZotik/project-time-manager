@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "project-time-manager"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3002,6 +3002,7 @@ dependencies = [
  "tauri-build",
  "uuid",
  "windows 0.58.0",
+ "winreg",
 ]
 
 [[package]]
