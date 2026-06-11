@@ -324,7 +324,7 @@ fn open_path(target: &str) -> Result<(), String> {
         let target = wide_null(target);
         let result = unsafe {
             ShellExecuteW(
-                HWND(0),
+                HWND(std::ptr::null_mut()),
                 PCWSTR(operation.as_ptr()),
                 PCWSTR(target.as_ptr()),
                 PCWSTR::null(),
