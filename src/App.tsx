@@ -8,8 +8,10 @@ import {
   CirclePlay,
   Download,
   FileText,
+  FolderOpen,
   FolderPlus,
   Import,
+  Link,
   RefreshCw,
   Square,
   TimerReset,
@@ -78,6 +80,11 @@ type ExportResult = {
   path: string;
 };
 
+type ToastState = {
+  text: string;
+  exportPath?: string;
+};
+
 const fallbackState: AppState = {
   tracker: {
     status: "stopped",
@@ -99,10 +106,12 @@ async function invokeCommand<T>(name: string, args: Record<string, unknown> = {}
 
 function formatDuration(seconds: number): string {
   const value = Number(seconds || 0);
-  const hours = Math.floor(value / 3600);
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   const secs = value % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  const clock = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return days > 0 ? `${days} д ${clock}` : clock;
 }
 
 function formatDateTime(value?: string | null): string {
@@ -148,7 +157,7 @@ export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
   const [newProjectName, setNewProjectName] = useState("");
-  const [message, setMessage] = useState("");
+  const [toast, setToast] = useState<ToastState | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -164,17 +173,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!message) return;
+    if (!toast) return;
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
-    toastTimerRef.current = window.setTimeout(() => setMessage(""), 2500);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 4200);
     return () => {
       if (toastTimerRef.current) {
         window.clearTimeout(toastTimerRef.current);
       }
     };
-  }, [message]);
+  }, [toast]);
 
   const selectedProject = state.selected_project;
   const apps = selectedProject?.apps ?? [];
@@ -182,6 +191,7 @@ export default function App() {
   const trackerStatus = state.tracker.status;
   const isRunning = trackerStatus === "running";
   const isPaused = trackerStatus === "paused";
+  const isRecordingLocked = isRunning;
   const statusLabel = trackerStatus === "running" ? "Запись" : trackerStatus === "paused" ? "Пауза" : "Остановлено";
 
   const totals = useMemo(() => {
@@ -209,7 +219,7 @@ export default function App() {
         null,
       );
     setNewProjectName("");
-    setMessage("Проект создан.");
+    setToast({ text: "Проект создан." });
     refresh();
   }
 
@@ -246,29 +256,41 @@ export default function App() {
   }
 
   async function exportXlsx() {
+    if (isRecordingLocked) return;
     const result = await invokeCommand<ExportResult | null>("export_selected_project_xlsx", {}, null);
-    setMessage(result?.message ?? "Экспорт выполнен.");
+    setToast({ text: result?.message ?? "Экспорт выполнен.", exportPath: result?.path });
     refresh();
   }
 
   async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    if (isRecordingLocked) return;
     const file = event.target.files?.[0];
     if (!file) return;
 
     const jsonText = await file.text();
     const result = await invokeCommand<ProjectSummary | null>("import_project_json", { jsonText }, null);
-    setMessage(result?.name ? `Импортирован проект: ${result.name}` : "Импорт выполнен.");
+    setToast({ text: result?.name ? `Импортирован проект: ${result.name}` : "Импорт выполнен." });
     event.target.value = "";
     refresh();
   }
 
+  async function openExportLocation(path?: string) {
+    if (!path) return;
+    await invokeCommand<void>("open_export_location", { path }, undefined);
+  }
+
+  async function openTabUrl(url?: string | null) {
+    if (!url) return;
+    await invokeCommand<void>("open_external_url", { url }, undefined);
+  }
+
   return (
     <div
-      className="h-screen min-h-[760px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
+      className="h-screen min-h-[820px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
-        <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
+        <main className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)] gap-4 overflow-hidden">
           <aside className="flex min-h-0 flex-col gap-5">
             <section className="flex min-h-0 flex-[1.15] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between gap-3">
@@ -369,11 +391,11 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <button className="secondary-button" onClick={() => importInputRef.current?.click()}>
+                  <button className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={isRecordingLocked}>
                     <Import size={16} />
                     Импорт JSON
                   </button>
-                  <button className="secondary-button" onClick={exportXlsx}>
+                  <button className="secondary-button" onClick={exportXlsx} disabled={isRecordingLocked}>
                     <Download size={16} />
                     Экспорт Excel
                   </button>
@@ -452,7 +474,17 @@ export default function App() {
                                       <span className="flex min-w-0 items-center gap-3">
                                         <TabIcon tab={tab} />
                                         <span className="min-w-0">
-                                        <strong className="block truncate text-sm text-slate-900">{tab.title}</strong>
+                                        <button
+                                          className="group flex max-w-full items-center gap-1 text-left disabled:cursor-default"
+                                          disabled={!tab.url}
+                                          onClick={() => openTabUrl(tab.url)}
+                                          title={tab.url || "URL недоступен"}
+                                        >
+                                          <strong className={`block truncate text-sm text-slate-900 ${tab.url ? "underline-offset-4 group-hover:underline" : ""}`}>
+                                            {tab.title}
+                                          </strong>
+                                          {tab.url ? <Link className="shrink-0 text-emerald-500" size={13} /> : null}
+                                        </button>
                                         <small className="block truncate text-xs text-slate-500">{tab.url || "URL недоступен"}</small>
                                         </span>
                                       </span>
@@ -479,7 +511,7 @@ export default function App() {
         </main>
       </div>
 
-      {message ? <Toast text={message} /> : null}
+      {toast ? <Toast toast={toast} onOpenExport={openExportLocation} /> : null}
     </div>
   );
 }
@@ -549,10 +581,15 @@ function EmptyState({ text }: { text: string }) {
   return <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">{text}</div>;
 }
 
-function Toast({ text }: { text: string }) {
+function Toast({ toast, onOpenExport }: { toast: ToastState; onOpenExport: (path?: string) => void }) {
   return (
-    <footer className="fixed bottom-5 right-5 max-w-[520px] rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(15,23,42,0.1)]">
-      {text}
+    <footer className="fixed bottom-5 right-5 flex max-w-[560px] items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(15,23,42,0.1)]">
+      <span className="min-w-0 truncate">{toast.text}</span>
+      {toast.exportPath ? (
+        <button className="icon-button bg-white" onClick={() => onOpenExport(toast.exportPath)} title="Открыть папку отчета">
+          <FolderOpen size={16} />
+        </button>
+      ) : null}
     </footer>
   );
 }

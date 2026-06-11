@@ -1,6 +1,7 @@
 use crate::models::*;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -42,6 +43,8 @@ pub fn storage_paths() -> Result<StoragePaths, String> {
 pub fn ensure_storage(paths: &StoragePaths) -> Result<(), String> {
     fs::create_dir_all(&paths.projects_dir).map_err(|err| err.to_string())?;
     migrate_legacy_storage(paths)?;
+    migrate_flat_project_files(paths)?;
+    migrate_legacy_exports(paths)?;
     Ok(())
 }
 
@@ -71,17 +74,23 @@ pub fn list_project_files(paths: &StoragePaths) -> Result<Vec<ProjectRecord>, St
     for entry in fs::read_dir(&paths.projects_dir).map_err(|err| err.to_string())? {
         let entry = entry.map_err(|err| err.to_string())?;
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
-            projects.push(project);
+        if path.is_dir() {
+            let project_file = path.join("project.json");
+            if project_file.exists() {
+                let content = fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
+                if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                    projects.push(project);
+                }
+            }
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+            if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                projects.push(project);
+            }
         }
     }
 
-    projects.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-    Ok(projects)
+    Ok(sort_and_dedupe_projects(projects))
 }
 
 pub fn load_store(paths: &StoragePaths) -> Result<StoreData, String> {
@@ -92,21 +101,36 @@ pub fn load_store(paths: &StoragePaths) -> Result<StoreData, String> {
 }
 
 pub fn project_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
-    paths
-        .projects_dir
-        .join(format!("{}.json", project_file_stem(project)))
+    project_dir(paths, project).join("project.json")
+}
+
+pub fn project_dir(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
+    paths.projects_dir.join(project_file_stem(project))
+}
+
+pub fn project_report_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
+    project_dir(paths, project).join(format!("{}.xlsx", project_file_stem(project)))
 }
 
 pub fn project_path_by_id(paths: &StoragePaths, project_id: &str) -> Result<PathBuf, String> {
     for entry in fs::read_dir(&paths.projects_dir).map_err(|err| err.to_string())? {
         let path = entry.map_err(|err| err.to_string())?.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
-            if project.id == project_id {
-                return Ok(path);
+        if path.is_dir() {
+            let project_file = path.join("project.json");
+            if project_file.exists() {
+                let content = fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
+                if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                    if project.id == project_id {
+                        return Ok(project_file);
+                    }
+                }
+            }
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+            if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                if project.id == project_id {
+                    return Ok(path);
+                }
             }
         }
     }
@@ -246,7 +270,7 @@ pub fn touch_app_time(
             process_path: observation.process_path.clone(),
             icon_data_url: observation.icon_data_url.clone(),
             kind,
-            enabled: true,
+            enabled: !is_own_app_process(&observation.process_name),
             time_seconds: 0,
             tabs: Vec::new(),
         });
@@ -303,7 +327,7 @@ pub fn touch_tab_time(
     } else {
         app.tabs.push(TabUsageRecord {
             key: tab_key.clone(),
-            title,
+            title: title.clone(),
             url: observation.url.clone(),
             favicon_url: observation.favicon_url.clone(),
             enabled: true,
@@ -314,6 +338,9 @@ pub fn touch_tab_time(
 
     if let Some(tab) = app.tabs.get_mut(index) {
         tab.time_seconds = tab.time_seconds.saturating_add(seconds);
+        if !title.trim().is_empty() && tab.title != title {
+            tab.title = title;
+        }
         if tab.url.is_none() {
             tab.url = observation.url.clone();
         }
@@ -372,6 +399,18 @@ pub fn project_file_stem(project: &ProjectRecord) -> String {
     }
 }
 
+fn is_own_app_process(process_name: &str) -> bool {
+    let normalized = process_name
+        .trim()
+        .trim_end_matches(".exe")
+        .to_lowercase()
+        .replace(['_', ' '], "-");
+    matches!(
+        normalized.as_str(),
+        "project-time-manager" | "projecttimemanager"
+    )
+}
+
 pub fn sanitize_file_name(name: &str) -> String {
     let forbidden = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let mut out = String::new();
@@ -416,12 +455,12 @@ fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
     };
 
     let legacy_root = exe_dir.join("data");
-    let legacy_projects = legacy_root.join("projects");
-    if !legacy_projects.exists() {
+    if paths.workspace_file.exists() {
         return Ok(());
     }
 
-    if paths.workspace_file.exists() {
+    let legacy_projects = legacy_root.join("projects");
+    if !legacy_projects.exists() {
         return Ok(());
     }
 
@@ -445,4 +484,81 @@ fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn migrate_flat_project_files(paths: &StoragePaths) -> Result<(), String> {
+    for entry in fs::read_dir(&paths.projects_dir).map_err(|err| err.to_string())? {
+        let path = entry.map_err(|err| err.to_string())?.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+            let target = project_path(paths, &project);
+            if !target.exists() {
+                write_text_file(&target, &content)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_legacy_exports(paths: &StoragePaths) -> Result<(), String> {
+    let legacy_exports = paths.root.join("exports");
+    if !legacy_exports.exists() {
+        return Ok(());
+    }
+
+    for project in list_project_files_without_migration(paths)? {
+        let old_report = legacy_exports.join(format!("{}.xlsx", project_file_stem(&project)));
+        if !old_report.exists() {
+            continue;
+        }
+        let new_report = project_report_path(paths, &project);
+        if !new_report.exists() {
+            if let Some(parent) = new_report.parent() {
+                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+            }
+            let _ = fs::copy(old_report, new_report);
+        }
+    }
+
+    Ok(())
+}
+
+fn list_project_files_without_migration(
+    paths: &StoragePaths,
+) -> Result<Vec<ProjectRecord>, String> {
+    let mut projects = Vec::new();
+
+    for entry in fs::read_dir(&paths.projects_dir).map_err(|err| err.to_string())? {
+        let path = entry.map_err(|err| err.to_string())?.path();
+        if path.is_dir() {
+            let project_file = path.join("project.json");
+            if project_file.exists() {
+                let content = fs::read_to_string(&project_file).map_err(|err| err.to_string())?;
+                if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                    projects.push(project);
+                }
+            }
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+            if let Ok(project) = serde_json::from_str::<ProjectRecord>(&content) {
+                projects.push(project);
+            }
+        }
+    }
+
+    Ok(sort_and_dedupe_projects(projects))
+}
+
+fn sort_and_dedupe_projects(mut projects: Vec<ProjectRecord>) -> Vec<ProjectRecord> {
+    projects.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+
+    let mut seen = HashSet::new();
+    projects
+        .into_iter()
+        .filter(|project| seen.insert(project.id.clone()))
+        .collect()
 }

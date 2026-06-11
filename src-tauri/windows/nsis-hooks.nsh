@@ -1,0 +1,3 @@
+!macro NSIS_HOOK_POSTUNINSTALL
+  RMDir "$INSTDIR"
+!macroend

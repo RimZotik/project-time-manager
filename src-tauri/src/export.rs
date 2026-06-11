@@ -128,9 +128,10 @@ fn write_report_sheet(
     worksheet
         .set_column_width(6, 16)
         .map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(7).map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(8).map_err(format_xlsx_error)?;
 
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
-    let total_hours = seconds_to_hours(total_seconds);
 
     worksheet
         .merge_range(
@@ -153,7 +154,14 @@ fn write_report_sheet(
         )
         .map_err(format_xlsx_error)?;
 
-    write_metric(worksheet, 3, 0, "Всего часов", total_hours, styles)?;
+    write_metric_text(
+        worksheet,
+        3,
+        0,
+        "Всего времени",
+        &format_duration(total_seconds),
+        styles,
+    )?;
     write_metric(worksheet, 3, 2, "Приложений", apps.len() as f64, styles)?;
     write_metric(
         worksheet,
@@ -171,8 +179,14 @@ fn write_report_sheet(
         .merge_range(6, 4, 6, 6, "Топ вкладок", &styles.section)
         .map_err(format_xlsx_error)?;
 
-    write_small_table_header(worksheet, 7, 0, &["Приложение", "Часы", "%"], styles)?;
-    write_small_table_header(worksheet, 7, 4, &["Вкладка", "Часы", "%"], styles)?;
+    write_small_table_header(
+        worksheet,
+        7,
+        0,
+        &["Приложение", "Длительность", "%"],
+        styles,
+    )?;
+    write_small_table_header(worksheet, 7, 4, &["Вкладка", "Длительность", "%"], styles)?;
 
     for (index, app) in apps.iter().take(8).enumerate() {
         let row = 8 + index as u32;
@@ -180,10 +194,13 @@ fn write_report_sheet(
             .write_string_with_format(row, 0, &app.name, &styles.text)
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 1, seconds_to_hours(app.seconds), &styles.number)
+            .write_string_with_format(row, 1, &format_duration(app.seconds), &styles.text)
             .map_err(format_xlsx_error)?;
         worksheet
             .write_number_with_format(row, 2, ratio(app.seconds, total_seconds), &styles.percent)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number(row, 7, seconds_to_hours(app.seconds))
             .map_err(format_xlsx_error)?;
     }
 
@@ -193,17 +210,20 @@ fn write_report_sheet(
             .write_string_with_format(row, 4, &tab.title, &styles.text)
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 5, seconds_to_hours(tab.seconds), &styles.number)
+            .write_string_with_format(row, 5, &format_duration(tab.seconds), &styles.text)
             .map_err(format_xlsx_error)?;
         worksheet
             .write_number_with_format(row, 6, ratio(tab.seconds, total_seconds), &styles.percent)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number(row, 8, seconds_to_hours(tab.seconds))
             .map_err(format_xlsx_error)?;
     }
 
     if !apps.is_empty() {
         let last_row = 8 + apps.len().min(8) as u32 - 1;
         let categories = format!("'Отчет'!$A$9:$A${}", last_row + 1);
-        let values = format!("'Отчет'!$B$9:$B${}", last_row + 1);
+        let values = format!("'Отчет'!$H$9:$H${}", last_row + 1);
         let mut chart = Chart::new(ChartType::Doughnut);
         chart.title().set_name("Распределение по приложениям");
         chart.set_style(10);
@@ -219,7 +239,7 @@ fn write_report_sheet(
     if !tabs.is_empty() {
         let last_row = 8 + tabs.len().min(8) as u32 - 1;
         let categories = format!("'Отчет'!$E$9:$E${}", last_row + 1);
-        let values = format!("'Отчет'!$F$9:$F${}", last_row + 1);
+        let values = format!("'Отчет'!$I$9:$I${}", last_row + 1);
         let mut chart = Chart::new(ChartType::Bar);
         chart.title().set_name("Время по вкладкам");
         chart.set_style(11);
@@ -256,12 +276,15 @@ fn write_apps_sheet(
     worksheet
         .set_column_width(3, 12)
         .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(4, 12)
+        .map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &["Название", "Процесс", "Тип", "Часы"],
+        &["Название", "Процесс", "Тип", "Длительность", "Часы"],
         styles,
     )?;
     for (index, app) in apps.iter().enumerate() {
@@ -276,13 +299,16 @@ fn write_apps_sheet(
             .write_string_with_format(row, 2, app_kind_label(&app.kind), &styles.text)
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 3, seconds_to_hours(app.seconds), &styles.number)
+            .write_string_with_format(row, 3, &format_duration(app.seconds), &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 4, seconds_to_hours(app.seconds), &styles.number)
             .map_err(format_xlsx_error)?;
     }
 
     if !apps.is_empty() {
         worksheet
-            .autofilter(0, 0, apps.len() as u32, 3)
+            .autofilter(0, 0, apps.len() as u32, 4)
             .map_err(format_xlsx_error)?;
     }
 
@@ -308,12 +334,15 @@ fn write_tabs_sheet(
     worksheet
         .set_column_width(3, 12)
         .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(4, 12)
+        .map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &["Браузер", "Вкладка", "URL", "Часы"],
+        &["Браузер", "Вкладка", "URL", "Длительность", "Часы"],
         styles,
     )?;
     for (index, tab) in tabs.iter().enumerate() {
@@ -334,13 +363,16 @@ fn write_tabs_sheet(
                 .map_err(format_xlsx_error)?;
         }
         worksheet
-            .write_number_with_format(row, 3, seconds_to_hours(tab.seconds), &styles.number)
+            .write_string_with_format(row, 3, &format_duration(tab.seconds), &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 4, seconds_to_hours(tab.seconds), &styles.number)
             .map_err(format_xlsx_error)?;
     }
 
     if !tabs.is_empty() {
         worksheet
-            .autofilter(0, 0, tabs.len() as u32, 3)
+            .autofilter(0, 0, tabs.len() as u32, 4)
             .map_err(format_xlsx_error)?;
     }
 
@@ -369,12 +401,22 @@ fn write_sessions_sheet(
     worksheet
         .set_column_width(4, 14)
         .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(5, 14)
+        .map_err(format_xlsx_error)?;
 
     write_small_table_header(
         worksheet,
         0,
         0,
-        &["Начало", "Окончание", "Часы", "Приложения", "Браузер"],
+        &[
+            "Начало",
+            "Окончание",
+            "Длительность",
+            "Часы",
+            "Приложения",
+            "Браузер",
+        ],
         styles,
     )?;
 
@@ -392,24 +434,32 @@ fn write_sessions_sheet(
             )
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(
+            .write_string_with_format(
                 row,
                 2,
+                &format_duration(session.duration_seconds),
+                &styles.text,
+            )
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(
+                row,
+                3,
                 seconds_to_hours(session.duration_seconds),
                 &styles.number,
             )
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 3, session.app_count as f64, &styles.number)
+            .write_number_with_format(row, 4, session.app_count as f64, &styles.number)
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 4, session.browser_count as f64, &styles.number)
+            .write_number_with_format(row, 5, session.browser_count as f64, &styles.number)
             .map_err(format_xlsx_error)?;
     }
 
     if !project.sessions.is_empty() {
         worksheet
-            .autofilter(0, 0, project.sessions.len() as u32, 4)
+            .autofilter(0, 0, project.sessions.len() as u32, 5)
             .map_err(format_xlsx_error)?;
     }
 
@@ -429,6 +479,23 @@ fn write_metric(
         .map_err(format_xlsx_error)?;
     worksheet
         .write_number_with_format(row + 1, col, value, &styles.metric_value)
+        .map_err(format_xlsx_error)?;
+    Ok(())
+}
+
+fn write_metric_text(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    row: u32,
+    col: u16,
+    label: &str,
+    value: &str,
+    styles: &ReportStyles,
+) -> Result<(), String> {
+    worksheet
+        .write_string_with_format(row, col, label, &styles.metric_label)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .write_string_with_format(row + 1, col, value, &styles.metric_value)
         .map_err(format_xlsx_error)?;
     Ok(())
 }
@@ -517,6 +584,19 @@ fn app_kind_label(kind: &str) -> &str {
 
 fn seconds_to_hours(seconds: u64) -> f64 {
     seconds as f64 / 3600.0
+}
+
+fn format_duration(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let secs = seconds % 60;
+    let clock = format!("{hours:02}:{minutes:02}:{secs:02}");
+    if days > 0 {
+        format!("{days} д {clock}")
+    } else {
+        clock
+    }
 }
 
 fn ratio(value: u64, total: u64) -> f64 {
