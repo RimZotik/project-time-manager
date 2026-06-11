@@ -47,6 +47,7 @@ struct IncludedTab {
     browser: String,
     title: String,
     url: Option<String>,
+    url_count: usize,
     seconds: u64,
 }
 
@@ -128,8 +129,21 @@ fn write_report_sheet(
     worksheet
         .set_column_width(6, 16)
         .map_err(format_xlsx_error)?;
-    worksheet.set_column_hidden(7).map_err(format_xlsx_error)?;
-    worksheet.set_column_hidden(8).map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(8, 3)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(9, 24)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(10, 12)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(12, 24)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(13, 12)
+        .map_err(format_xlsx_error)?;
 
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
 
@@ -202,6 +216,12 @@ fn write_report_sheet(
         worksheet
             .write_number(row, 7, seconds_to_hours(app.seconds))
             .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(row, 9, &app.name, &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 10, seconds_to_hours(app.seconds), &styles.number)
+            .map_err(format_xlsx_error)?;
     }
 
     for (index, tab) in tabs.iter().take(8).enumerate() {
@@ -218,39 +238,54 @@ fn write_report_sheet(
         worksheet
             .write_number(row, 8, seconds_to_hours(tab.seconds))
             .map_err(format_xlsx_error)?;
+        worksheet
+            .write_string_with_format(row, 12, &tab.title, &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 13, seconds_to_hours(tab.seconds), &styles.number)
+            .map_err(format_xlsx_error)?;
     }
+
+    worksheet
+        .write_string_with_format(7, 9, "Данные графика приложений", &styles.header)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .write_string_with_format(7, 10, "Часы", &styles.header)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .write_string_with_format(7, 12, "Данные графика доменов", &styles.header)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .write_string_with_format(7, 13, "Часы", &styles.header)
+        .map_err(format_xlsx_error)?;
 
     if !apps.is_empty() {
         let last_row = 8 + apps.len().min(8) as u32 - 1;
-        let categories = format!("'Отчет'!$A$9:$A${}", last_row + 1);
-        let values = format!("'Отчет'!$H$9:$H${}", last_row + 1);
         let mut chart = Chart::new(ChartType::Pie);
         chart.title().set_name("Распределение по приложениям");
         chart.set_style(10);
         chart
             .add_series()
             .set_name("Приложения")
-            .set_categories(&categories)
-            .set_values(&values);
+            .set_categories(("Отчет", 8, 9, last_row, 9))
+            .set_values(("Отчет", 8, 10, last_row, 10));
         worksheet
-            .insert_chart(18, 0, &chart)
+            .insert_chart(20, 0, &chart)
             .map_err(format_xlsx_error)?;
     }
 
     if !tabs.is_empty() {
         let last_row = 8 + tabs.len().min(8) as u32 - 1;
-        let categories = format!("'Отчет'!$E$9:$E${}", last_row + 1);
-        let values = format!("'Отчет'!$I$9:$I${}", last_row + 1);
         let mut chart = Chart::new(ChartType::Column);
-        chart.title().set_name("Время по вкладкам");
+        chart.title().set_name("Время по доменам");
         chart.set_style(11);
         chart
             .add_series()
-            .set_name("Вкладки")
-            .set_categories(&categories)
-            .set_values(&values);
+            .set_name("Домены")
+            .set_categories(("Отчет", 8, 12, last_row, 12))
+            .set_values(("Отчет", 8, 13, last_row, 13));
         worksheet
-            .insert_chart(18, 4, &chart)
+            .insert_chart(20, 4, &chart)
             .map_err(format_xlsx_error)?;
     }
 
@@ -280,6 +315,9 @@ fn write_apps_sheet(
         .map_err(format_xlsx_error)?;
     worksheet
         .set_column_width(4, 12)
+        .map_err(format_xlsx_error)?;
+    worksheet
+        .set_column_width(5, 12)
         .map_err(format_xlsx_error)?;
 
     write_small_table_header(
@@ -344,7 +382,7 @@ fn write_tabs_sheet(
         worksheet,
         0,
         0,
-        &["Браузер", "Вкладка", "URL", "Длительность", "Часы"],
+        &["Браузер", "Домен", "Основной URL", "Ссылок", "Длительность", "Часы"],
         styles,
     )?;
     for (index, tab) in tabs.iter().enumerate() {
@@ -365,16 +403,19 @@ fn write_tabs_sheet(
                 .map_err(format_xlsx_error)?;
         }
         worksheet
-            .write_string_with_format(row, 3, &format_duration(tab.seconds), &styles.text)
+            .write_number_with_format(row, 3, tab.url_count as f64, &styles.number)
             .map_err(format_xlsx_error)?;
         worksheet
-            .write_number_with_format(row, 4, seconds_to_hours(tab.seconds), &styles.number)
+            .write_string_with_format(row, 4, &format_duration(tab.seconds), &styles.text)
+            .map_err(format_xlsx_error)?;
+        worksheet
+            .write_number_with_format(row, 5, seconds_to_hours(tab.seconds), &styles.number)
             .map_err(format_xlsx_error)?;
     }
 
     if !tabs.is_empty() {
         worksheet
-            .autofilter(0, 0, tabs.len() as u32, 4)
+            .autofilter(0, 0, tabs.len() as u32, 5)
             .map_err(format_xlsx_error)?;
     }
 
@@ -552,6 +593,11 @@ fn included_tabs(project: &ProjectRecord) -> Vec<IncludedTab> {
                     browser: app.name.clone(),
                     title: tab.title.clone(),
                     url: tab.url.clone(),
+                    url_count: if tab.urls.is_empty() {
+                        usize::from(tab.url.is_some())
+                    } else {
+                        tab.urls.len()
+                    },
                     seconds: tab.time_seconds,
                 })
             })

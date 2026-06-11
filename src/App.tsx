@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   CirclePause,
   CirclePlay,
   Download,
@@ -13,8 +14,10 @@ import {
   Import,
   Link,
   RefreshCw,
+  Settings,
   Square,
   TimerReset,
+  X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -36,9 +39,17 @@ type TabUsageRecord = {
   key: string;
   title: string;
   url: string | null;
+  urls?: VisitedUrlRecord[];
   favicon_url?: string | null;
   enabled: boolean;
   time_seconds: number;
+};
+
+type VisitedUrlRecord = {
+  url: string;
+  title: string;
+  last_seen_at: string;
+  hits: number;
 };
 
 type AppUsageRecord = {
@@ -209,9 +220,24 @@ function sortRankedTabs(app: AppUsageRecord, totalSeconds: number): RankedTab[] 
     .map((item) => item);
 }
 
+function tabUrlList(tab: TabUsageRecord): VisitedUrlRecord[] {
+  const history = [...(tab.urls ?? [])].filter((item) => item.url?.trim());
+  if (history.length === 0 && tab.url) {
+    history.push({
+      url: tab.url,
+      title: tab.title,
+      last_seen_at: "",
+      hits: 1,
+    });
+  }
+  return history.sort((left, right) => right.hits - left.hits || right.last_seen_at.localeCompare(left.last_seen_at));
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
+  const [linkMenu, setLinkMenu] = useState<string | null>(null);
+  const [modal, setModal] = useState<"settings" | "help" | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -224,6 +250,10 @@ export default function App() {
 
   useEffect(() => {
     refresh();
+    if (window.localStorage.getItem("project-time-manager-help-seen") !== "1") {
+      setModal("help");
+      window.localStorage.setItem("project-time-manager-help-seen", "1");
+    }
     const timer = window.setInterval(refresh, 1500);
     return () => window.clearInterval(timer);
   }, []);
@@ -351,13 +381,13 @@ export default function App() {
 
   return (
     <div
-      className="h-screen min-h-[820px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
+      className="h-screen min-h-[900px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
         <main className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)] gap-4 overflow-hidden">
-          <aside className="flex min-h-0 flex-col gap-5">
-            <section className="flex min-h-0 flex-[1.15] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <aside className="flex min-h-0 flex-col gap-4">
+            <section className="flex min-h-0 flex-[1.08] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-900">Проекты</h2>
                 <button className="icon-button" onClick={refresh} title="Обновить">
@@ -424,6 +454,19 @@ export default function App() {
                 </div>
               </div>
             </section>
+
+            <section className="shrink-0 rounded-[24px] border border-emerald-100 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="grid grid-cols-2 gap-2">
+                <button className="secondary-button min-h-10 px-3" onClick={() => setModal("settings")}>
+                  <Settings size={16} />
+                  Настройки
+                </button>
+                <button className="secondary-button min-h-10 px-3" onClick={() => setModal("help")}>
+                  <CircleAlert size={16} />
+                  Помощь
+                </button>
+              </div>
+            </section>
           </aside>
 
           <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden">
@@ -478,9 +521,9 @@ export default function App() {
               <>
                 <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
                   <Metric label="Всего по проекту" value={formatDuration(totals.appTime)} accent="emerald" />
+                  <Metric label="Сеансов" value={String(sessions.length)} accent="emerald" />
                   <Metric label="Топ приложение" value={totals.topApp?.name ?? "-"} accent="slate" />
                   <Metric label="Топ вкладка" value={totals.topTab?.title ?? "-"} accent="slate" />
-                  <Metric label="Сеансов" value={String(sessions.length)} accent="emerald" />
                 </section>
 
                 <section className="flex min-h-0 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -537,44 +580,74 @@ export default function App() {
 
                               {app.kind === "browser" && isOpen ? (
                                 <div className="ml-4 grid gap-2 sm:ml-10">
-                                  {sortRankedTabs(app, totals.appTime).map(({ tab, includedSeconds: tabIncluded, actualSeconds: tabActual, includedPercent: tabIncludedPercent, actualPercent: tabActualPercent }) => (
-                                    <div
-                                      key={tab.key}
-                                      className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
-                                        tab.enabled ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 text-slate-500"
-                                      }`}
-                                    >
-                                      <Checkbox
-                                        checked={tab.enabled}
-                                        onChange={(checked) => toggleTab(selectedProject.id, app.key, tab.key, checked)}
-                                      />
-                                      <span className="flex min-w-0 items-center gap-3">
-                                        <TabIcon tab={tab} />
-                                        <span className="min-w-0">
-                                        <button
-                                          className="group flex max-w-full items-center gap-1 text-left disabled:cursor-default"
-                                          disabled={!tab.url}
-                                          onClick={() => openTabUrl(tab.url)}
-                                          title={tab.url || "URL недоступен"}
-                                        >
-                                          <strong className={`block truncate text-sm ${tab.enabled ? "text-slate-900" : "text-slate-500"} ${tab.url ? "underline-offset-4 group-hover:underline" : ""}`}>
-                                            {tab.title}
-                                          </strong>
-                                          {tab.url ? <Link className="shrink-0 text-emerald-500" size={13} /> : null}
-                                        </button>
-                                        <small className={`block truncate text-xs ${tab.enabled ? "text-slate-500" : "text-slate-400"}`}>{tab.url || "URL недоступен"}</small>
+                                  {sortRankedTabs(app, totals.appTime).map(({ tab, includedSeconds: tabIncluded, actualSeconds: tabActual, includedPercent: tabIncludedPercent, actualPercent: tabActualPercent }) => {
+                                    const urls = tabUrlList(tab);
+                                    const menuKey = `${app.key}:${tab.key}`;
+                                    const isMenuOpen = linkMenu === menuKey;
+
+                                    return (
+                                      <div
+                                        key={tab.key}
+                                        className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
+                                          tab.enabled ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 text-slate-500"
+                                        }`}
+                                      >
+                                        <Checkbox
+                                          checked={tab.enabled}
+                                          onChange={(checked) => toggleTab(selectedProject.id, app.key, tab.key, checked)}
+                                        />
+                                        <span className="flex min-w-0 items-center gap-3">
+                                          <TabIcon tab={tab} />
+                                          <span className="relative min-w-0">
+                                            <span className="flex max-w-full items-center gap-2">
+                                              <strong className={`block truncate text-sm ${tab.enabled ? "text-slate-900" : "text-slate-500"}`}>
+                                                {tab.title}
+                                              </strong>
+                                              {urls.length ? (
+                                                <button
+                                                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 text-emerald-600 transition-colors hover:border-emerald-200 hover:bg-emerald-100"
+                                                  onClick={() => setLinkMenu(isMenuOpen ? null : menuKey)}
+                                                  title="Ссылки домена"
+                                                >
+                                                  <Link size={13} />
+                                                </button>
+                                              ) : null}
+                                            </span>
+                                            <small className={`block truncate text-xs ${tab.enabled ? "text-slate-500" : "text-slate-400"}`}>
+                                              {urls.length ? `${urls.length} ссылок в этом домене` : "URL недоступен"}
+                                            </small>
+                                            {isMenuOpen ? (
+                                              <div className="absolute left-0 top-12 z-20 w-[min(460px,70vw)] rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]">
+                                                <div className="max-h-60 overflow-y-auto pr-1">
+                                                  {urls.map((item) => (
+                                                    <button
+                                                      key={item.url}
+                                                      className="block w-full rounded-xl px-3 py-2 text-left transition-colors hover:bg-emerald-50"
+                                                      onClick={() => {
+                                                        setLinkMenu(null);
+                                                        openTabUrl(item.url);
+                                                      }}
+                                                    >
+                                                      <strong className="block truncate text-xs text-slate-900">{item.title || item.url}</strong>
+                                                      <span className="block truncate text-xs text-slate-500">{item.url}</span>
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            ) : null}
+                                          </span>
                                         </span>
-                                      </span>
-                                      <span className="font-mono text-sm text-slate-700">
-                                        {tab.enabled ? formatDuration(tabIncluded) : "00:00:00"}
-                                        {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(tabActual)}</small> : null}
-                                      </span>
-                                      <span className="text-sm text-slate-500">
-                                        {tab.enabled ? tabIncludedPercent : "0%"}
-                                        {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{tabActualPercent}</small> : null}
-                                      </span>
-                                    </div>
-                                  ))}
+                                        <span className="font-mono text-sm text-slate-700">
+                                          {tab.enabled ? formatDuration(tabIncluded) : "00:00:00"}
+                                          {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(tabActual)}</small> : null}
+                                        </span>
+                                        <span className="text-sm text-slate-500">
+                                          {tab.enabled ? tabIncludedPercent : "0%"}
+                                          {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{tabActualPercent}</small> : null}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               ) : null}
                             </div>
@@ -594,6 +667,7 @@ export default function App() {
         </main>
       </div>
 
+      {modal ? <AppModal type={modal} onClose={() => setModal(null)} /> : null}
       {toast ? <Toast toast={toast} onOpenExport={openExportLocation} /> : null}
     </div>
   );
@@ -674,5 +748,70 @@ function Toast({ toast, onOpenExport }: { toast: ToastState; onOpenExport: (path
         </button>
       ) : null}
     </footer>
+  );
+}
+
+function AppModal({ type, onClose }: { type: "settings" | "help"; onClose: () => void }) {
+  const isHelp = type === "help";
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/24 px-5 backdrop-blur-sm">
+      <section className="w-full max-w-[720px] overflow-hidden rounded-[30px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.22)]">
+        <header className="flex items-start justify-between gap-4 bg-[linear-gradient(135deg,#ecfdf5_0%,#ffffff_62%,#dcfce7_100%)] px-7 py-6">
+          <div>
+            <span className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold uppercase text-white">
+              Project Time Manager
+            </span>
+            <h2 className="mt-4 text-2xl font-semibold text-slate-900">{isHelp ? "Краткая инструкция" : "Настройки"}</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
+              {isHelp ? "Основные действия для работы с проектами, записью времени и отбором данных для отчетов." : "Здесь появятся параметры приложения, когда они понадобятся."}
+            </p>
+          </div>
+          <button className="icon-button shrink-0" onClick={onClose} title="Закрыть">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="stable-scroll max-h-[58vh] overflow-y-auto px-7 py-6">
+          {isHelp ? (
+            <div className="grid gap-4">
+              <HelpItem
+                title="Проекты"
+                text="Создай проект в левом столбце или выбери существующий. Все записи, отчеты Excel/PDF и JSON проекта хранятся в папке этого проекта."
+              />
+              <HelpItem
+                title="Запись времени"
+                text="Нажми Старт, работай как обычно и затем поставь запись на паузу или останови ее. Во время активной записи импорт и экспорт отключены."
+              />
+              <HelpItem
+                title="Приложения"
+                text="В таблице видно, какие окна были активны. Галочка управляет тем, учитывается ли приложение в итоговом времени и отчетах."
+              />
+              <HelpItem
+                title="Сайты"
+                text="Браузеры раскрываются как группы доменов. Нажми значок цепочки у домена, чтобы увидеть все посещенные URL и открыть нужный в браузере."
+              />
+              <HelpItem
+                title="Отчеты"
+                text="Excel и PDF строятся только по включенным приложениям и сайтам. Если отчет открыт в другой программе, новый файл сохраняется с временной меткой."
+              />
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-dashed border-emerald-200 bg-emerald-50/70 px-6 py-8 text-sm text-slate-600">
+              Настроек пока нет. Окно оставлено под будущие параметры приложения.
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HelpItem({ title, text }: { title: string; text: string }) {
+  return (
+    <article className="rounded-3xl border border-emerald-100 bg-slate-50 px-5 py-4">
+      <strong className="block text-sm font-semibold text-emerald-800">{title}</strong>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+    </article>
   );
 }

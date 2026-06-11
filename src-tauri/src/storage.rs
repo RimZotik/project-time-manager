@@ -339,9 +339,15 @@ pub fn touch_tab_time(
         .tab_title
         .clone()
         .unwrap_or_else(|| observation.window_title.clone());
-    let tab_identity = observation.url.as_deref().unwrap_or(&title);
+    let domain = observation
+        .url
+        .as_deref()
+        .and_then(extract_domain)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| title.trim().to_string());
     let tab_key = format!(
-        "{tab_identity}::{}",
+        "{}::{}",
+        domain.to_lowercase(),
         observation.browser_name.clone().unwrap_or_default()
     );
 
@@ -350,8 +356,9 @@ pub fn touch_tab_time(
     } else {
         app.tabs.push(TabUsageRecord {
             key: tab_key.clone(),
-            title: title.clone(),
+            title: domain.clone(),
             url: observation.url.clone(),
+            urls: Vec::new(),
             favicon_url: observation.favicon_url.clone(),
             enabled: true,
             time_seconds: 0,
@@ -361,8 +368,8 @@ pub fn touch_tab_time(
 
     if let Some(tab) = app.tabs.get_mut(index) {
         tab.time_seconds = tab.time_seconds.saturating_add(seconds);
-        if !title.trim().is_empty() && tab.title != title {
-            tab.title = title;
+        if !domain.trim().is_empty() && tab.title != domain {
+            tab.title = domain;
         }
         if tab.url.is_none() {
             tab.url = observation.url.clone();
@@ -370,6 +377,63 @@ pub fn touch_tab_time(
         if tab.favicon_url.is_none() {
             tab.favicon_url = observation.favicon_url.clone();
         }
+        if let Some(url) = observation.url.as_deref().filter(|value| !value.trim().is_empty()) {
+            touch_url_history(tab, url, &title);
+        }
+    }
+}
+
+fn touch_url_history(tab: &mut TabUsageRecord, url: &str, title: &str) {
+    let now = now_iso();
+    let clean_title = title.trim();
+    if let Some(entry) = tab.urls.iter_mut().find(|item| item.url == url) {
+        entry.hits = entry.hits.saturating_add(1);
+        entry.last_seen_at = now;
+        if !clean_title.is_empty() {
+            entry.title = clean_title.to_string();
+        }
+        return;
+    }
+
+    tab.urls.push(VisitedUrlRecord {
+        url: url.to_string(),
+        title: if clean_title.is_empty() {
+            url.to_string()
+        } else {
+            clean_title.to_string()
+        },
+        last_seen_at: now,
+        hits: 1,
+    });
+}
+
+fn extract_domain(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .or_else(|| trimmed.strip_prefix("file://"))
+        .unwrap_or(trimmed);
+    let host = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .split('@')
+        .last()
+        .unwrap_or_default()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("www.");
+
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
     }
 }
 

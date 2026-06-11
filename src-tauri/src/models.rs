@@ -56,10 +56,20 @@ pub struct TabUsageRecord {
     pub key: String,
     pub title: String,
     pub url: Option<String>,
+    #[serde(default)]
+    pub urls: Vec<VisitedUrlRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub favicon_url: Option<String>,
     pub enabled: bool,
     pub time_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VisitedUrlRecord {
+    pub url: String,
+    pub title: String,
+    pub last_seen_at: String,
+    pub hits: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
