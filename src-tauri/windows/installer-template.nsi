@@ -429,7 +429,6 @@ Function FinishShow
   Pop $DeleteInstallerCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteInstallerCheckbox ${WM_SETFONT} $1 1
-  BringWindowToTop $DeleteInstallerCheckbox
   ShowWindow $DeleteInstallerCheckbox ${SW_SHOW}
 FunctionEnd
 
