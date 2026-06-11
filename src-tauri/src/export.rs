@@ -224,11 +224,12 @@ fn write_report_sheet(
         let last_row = 8 + apps.len().min(8) as u32 - 1;
         let categories = format!("'Отчет'!$A$9:$A${}", last_row + 1);
         let values = format!("'Отчет'!$H$9:$H${}", last_row + 1);
-        let mut chart = Chart::new(ChartType::Doughnut);
+        let mut chart = Chart::new(ChartType::Pie);
         chart.title().set_name("Распределение по приложениям");
         chart.set_style(10);
         chart
             .add_series()
+            .set_name("Приложения")
             .set_categories(&categories)
             .set_values(&values);
         worksheet
@@ -240,11 +241,12 @@ fn write_report_sheet(
         let last_row = 8 + tabs.len().min(8) as u32 - 1;
         let categories = format!("'Отчет'!$E$9:$E${}", last_row + 1);
         let values = format!("'Отчет'!$I$9:$I${}", last_row + 1);
-        let mut chart = Chart::new(ChartType::Bar);
+        let mut chart = Chart::new(ChartType::Column);
         chart.title().set_name("Время по вкладкам");
         chart.set_style(11);
         chart
             .add_series()
+            .set_name("Вкладки")
             .set_categories(&categories)
             .set_values(&values);
         worksheet

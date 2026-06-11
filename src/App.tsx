@@ -85,6 +85,22 @@ type ToastState = {
   exportPath?: string;
 };
 
+type RankedApp = {
+  app: AppUsageRecord;
+  includedSeconds: number;
+  actualSeconds: number;
+  includedPercent: string;
+  actualPercent: string;
+};
+
+type RankedTab = {
+  tab: TabUsageRecord;
+  includedSeconds: number;
+  actualSeconds: number;
+  includedPercent: string;
+  actualPercent: string;
+};
+
 const fallbackState: AppState = {
   tracker: {
     status: "stopped",
@@ -153,6 +169,46 @@ function tabIncludedSeconds(app: AppUsageRecord, tab: TabUsageRecord): number {
   return app.enabled && tab.enabled ? tab.time_seconds : 0;
 }
 
+function appActualSeconds(app: AppUsageRecord): number {
+  if (app.kind === "browser") {
+    return app.tabs.reduce((sum, tab) => sum + tab.time_seconds, 0);
+  }
+  return app.time_seconds;
+}
+
+function sortRankedApps(apps: AppUsageRecord[], totalSeconds: number): RankedApp[] {
+  return [...apps]
+    .map((app) => {
+      const includedSeconds = appIncludedSeconds(app);
+      const actualSeconds = appActualSeconds(app);
+      return {
+        app,
+        includedSeconds,
+        actualSeconds,
+        includedPercent: percentOf(totalSeconds, includedSeconds),
+        actualPercent: percentOf(totalSeconds, actualSeconds),
+      };
+    })
+    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.app.name.localeCompare(right.app.name, "ru"))
+    .map((item) => item);
+}
+
+function sortRankedTabs(app: AppUsageRecord, totalSeconds: number): RankedTab[] {
+  return [...app.tabs]
+    .map((tab) => {
+      const includedSeconds = tabIncludedSeconds(app, tab);
+      return {
+        tab,
+        includedSeconds,
+        actualSeconds: tab.time_seconds,
+        includedPercent: percentOf(totalSeconds, includedSeconds),
+        actualPercent: percentOf(totalSeconds, tab.time_seconds),
+      };
+    })
+    .sort((left, right) => right.includedSeconds - left.includedSeconds || right.actualSeconds - left.actualSeconds || left.tab.title.localeCompare(right.tab.title, "ru"))
+    .map((item) => item);
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
@@ -208,6 +264,8 @@ export default function App() {
     return { appTime, topApp, topTab };
   }, [apps]);
 
+  const rankedApps = useMemo(() => sortRankedApps(apps, totals.appTime), [apps, totals.appTime]);
+
   async function createProject() {
     if (!newProjectName.trim()) return;
     await invokeCommand<ProjectSummary | null>(
@@ -262,6 +320,13 @@ export default function App() {
     refresh();
   }
 
+  async function exportPdf() {
+    if (isRecordingLocked) return;
+    const result = await invokeCommand<ExportResult | null>("export_selected_project_pdf", {}, null);
+    setToast({ text: result?.message ?? "Экспорт выполнен.", exportPath: result?.path });
+    refresh();
+  }
+
   async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
     if (isRecordingLocked) return;
     const file = event.target.files?.[0];
@@ -276,7 +341,7 @@ export default function App() {
 
   async function openExportLocation(path?: string) {
     if (!path) return;
-    await invokeCommand<void>("open_export_location", { path }, undefined);
+    await invokeCommand<void>("open_report_file", { path }, undefined);
   }
 
   async function openTabUrl(url?: string | null) {
@@ -313,7 +378,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-auto pr-1">
+              <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-y-scroll pr-1">
                 <div className="grid gap-2">
                   {state.projects.length ? (
                     state.projects.map((project) => (
@@ -342,7 +407,7 @@ export default function App() {
 
             <section className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <SectionTitle icon={<TimerReset size={16} />} title="Сеансы" />
-              <div className="stable-scroll mt-3 min-h-0 flex-1 overflow-auto pr-1">
+              <div className="stable-scroll mt-3 min-h-0 flex-1 overflow-y-scroll pr-1">
                 <div className="grid gap-2">
                 {sessions.length ? (
                   sessions.map((session) => (
@@ -399,7 +464,7 @@ export default function App() {
                     <Download size={16} />
                     Экспорт Excel
                   </button>
-                  <button className="secondary-button opacity-50" disabled title="Экспорт PDF пока не включен">
+                  <button className="secondary-button" onClick={exportPdf} disabled={isRecordingLocked}>
                     <FileText size={16} />
                     PDF
                   </button>
@@ -429,15 +494,19 @@ export default function App() {
                       <span>%</span>
                     </div>
 
-                    <div className="stable-scroll min-h-0 overflow-auto pr-1">
+                    <div className="stable-scroll min-h-0 overflow-y-scroll pr-1">
                       <div className="grid gap-2">
-                        {apps.map((app) => {
-                          const appTotal = appIncludedSeconds(app);
+                        {rankedApps.map(({ app, includedSeconds, actualSeconds, includedPercent, actualPercent }) => {
                           const isOpen = expandedApps[app.key];
+                          const isIncluded = app.enabled;
 
                           return (
                             <div key={app.key} className="grid gap-2">
-                              <div className="grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4">
+                              <div
+                                className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
+                                  isIncluded ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-slate-100/80 text-slate-500"
+                                }`}
+                              >
                                 <Checkbox checked={app.enabled} onChange={(checked) => toggleApp(selectedProject.id, app.key, checked)} />
 
                                 <button
@@ -446,8 +515,8 @@ export default function App() {
                                 >
                                   <AppIcon app={app} />
                                   <span className="min-w-0">
-                                    <strong className="block truncate text-sm text-slate-900">{app.name}</strong>
-                                    <small className="block truncate text-xs text-slate-500">
+                                    <strong className={`block truncate text-sm ${isIncluded ? "text-slate-900" : "text-slate-500"}`}>{app.name}</strong>
+                                    <small className={`block truncate text-xs ${isIncluded ? "text-slate-500" : "text-slate-400"}`}>
                                       {app.kind === "browser" ? "Браузер" : app.process_path || app.process_name}
                                     </small>
                                   </span>
@@ -456,16 +525,24 @@ export default function App() {
                                   ) : null}
                                 </button>
 
-                                <span className="font-mono text-sm text-slate-700">{formatDuration(appTotal)}</span>
-                                <span className="text-sm text-slate-500">{percentOf(totals.appTime, appTotal)}</span>
+                                <span className="font-mono text-sm text-slate-700">
+                                  {isIncluded ? formatDuration(includedSeconds) : "00:00:00"}
+                                  {!isIncluded ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(actualSeconds)}</small> : null}
+                                </span>
+                                <span className="text-sm text-slate-500">
+                                  {isIncluded ? includedPercent : "0%"}
+                                  {!isIncluded ? <small className="mt-1 block text-xs text-slate-400">{actualPercent}</small> : null}
+                                </span>
                               </div>
 
                               {app.kind === "browser" && isOpen ? (
                                 <div className="ml-4 grid gap-2 sm:ml-10">
-                                  {app.tabs.map((tab) => (
+                                  {sortRankedTabs(app, totals.appTime).map(({ tab, includedSeconds: tabIncluded, actualSeconds: tabActual, includedPercent: tabIncludedPercent, actualPercent: tabActualPercent }) => (
                                     <div
                                       key={tab.key}
-                                      className="grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4"
+                                      className={`grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] items-start gap-2 rounded-2xl border px-3 py-3 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4 ${
+                                        tab.enabled ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 text-slate-500"
+                                      }`}
                                     >
                                       <Checkbox
                                         checked={tab.enabled}
@@ -480,16 +557,22 @@ export default function App() {
                                           onClick={() => openTabUrl(tab.url)}
                                           title={tab.url || "URL недоступен"}
                                         >
-                                          <strong className={`block truncate text-sm text-slate-900 ${tab.url ? "underline-offset-4 group-hover:underline" : ""}`}>
+                                          <strong className={`block truncate text-sm ${tab.enabled ? "text-slate-900" : "text-slate-500"} ${tab.url ? "underline-offset-4 group-hover:underline" : ""}`}>
                                             {tab.title}
                                           </strong>
                                           {tab.url ? <Link className="shrink-0 text-emerald-500" size={13} /> : null}
                                         </button>
-                                        <small className="block truncate text-xs text-slate-500">{tab.url || "URL недоступен"}</small>
+                                        <small className={`block truncate text-xs ${tab.enabled ? "text-slate-500" : "text-slate-400"}`}>{tab.url || "URL недоступен"}</small>
                                         </span>
                                       </span>
-                                      <span className="font-mono text-sm text-slate-700">{formatDuration(tab.time_seconds)}</span>
-                                      <span className="text-sm text-slate-500">{percentOf(totals.appTime, tabIncludedSeconds(app, tab))}</span>
+                                      <span className="font-mono text-sm text-slate-700">
+                                        {tab.enabled ? formatDuration(tabIncluded) : "00:00:00"}
+                                        {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{formatDuration(tabActual)}</small> : null}
+                                      </span>
+                                      <span className="text-sm text-slate-500">
+                                        {tab.enabled ? tabIncludedPercent : "0%"}
+                                        {!tab.enabled ? <small className="mt-1 block text-xs text-slate-400">{tabActualPercent}</small> : null}
+                                      </span>
                                     </div>
                                   ))}
                                 </div>
@@ -586,7 +669,7 @@ function Toast({ toast, onOpenExport }: { toast: ToastState; onOpenExport: (path
     <footer className="fixed bottom-5 right-5 flex max-w-[560px] items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(15,23,42,0.1)]">
       <span className="min-w-0 truncate">{toast.text}</span>
       {toast.exportPath ? (
-        <button className="icon-button bg-white" onClick={() => onOpenExport(toast.exportPath)} title="Открыть папку отчета">
+        <button className="icon-button bg-white" onClick={() => onOpenExport(toast.exportPath)} title="Открыть отчет">
           <FolderOpen size={16} />
         </button>
       ) : null}

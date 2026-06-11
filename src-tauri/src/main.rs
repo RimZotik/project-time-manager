@@ -1,14 +1,15 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod export;
+mod pdf;
 mod models;
 mod storage;
 mod windows;
 
 use crate::export::export_project_xlsx;
+use crate::pdf::export_project_pdf;
 use crate::models::*;
 use crate::storage::*;
-use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -178,7 +179,7 @@ fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportRe
     let store = state.store.lock().map_err(|err| err.to_string())?.clone();
     let project =
         selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
-    let path = project_report_path(&state.paths, &project);
+    let path = reserve_report_path(&project_report_path(&state.paths, &project));
     export_project_xlsx(&project, path.clone())?;
     Ok(ExportResult {
         message: format!("Excel-отчет сохранен: {}", path.display()),
@@ -187,7 +188,21 @@ fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportRe
 }
 
 #[tauri::command]
-fn open_export_location(path: String) -> Result<(), String> {
+fn export_selected_project_pdf(state: State<'_, AppRuntime>) -> Result<ExportResult, String> {
+    ensure_tracker_idle(&state)?;
+    let store = state.store.lock().map_err(|err| err.to_string())?.clone();
+    let project =
+        selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
+    let path = reserve_report_path(&project_report_pdf_path(&state.paths, &project));
+    export_project_pdf(&project, path.clone())?;
+    Ok(ExportResult {
+        message: format!("PDF-отчет сохранен: {}", path.display()),
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn open_report_file(path: String) -> Result<(), String> {
     open_path(&path)
 }
 
@@ -244,36 +259,16 @@ fn ensure_tracker_idle(state: &State<'_, AppRuntime>) -> Result<(), String> {
 fn open_path(target: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let command_target = if Path::new(target).exists() {
-            Path::new(target)
-                .parent()
-                .unwrap_or_else(|| Path::new(target))
-                .to_string_lossy()
-                .to_string()
-        } else {
-            target.to_string()
-        };
-
         Command::new("cmd")
-            .args(["/C", "start", "", &command_target])
+            .args(["/C", "start", "", target])
             .spawn()
             .map_err(|err| err.to_string())?;
     }
 
     #[cfg(target_os = "macos")]
     {
-        let command_target = if Path::new(target).exists() {
-            Path::new(target)
-                .parent()
-                .unwrap_or_else(|| Path::new(target))
-                .to_string_lossy()
-                .to_string()
-        } else {
-            target.to_string()
-        };
-
         Command::new("open")
-            .arg(command_target)
+            .arg(target)
             .spawn()
             .map_err(|err| err.to_string())?;
     }
@@ -418,7 +413,8 @@ fn main() {
             toggle_tab_included,
             import_project_json,
             export_selected_project_xlsx,
-            open_export_location,
+            export_selected_project_pdf,
+            open_report_file,
             open_external_url
         ])
         .run(tauri::generate_context!())

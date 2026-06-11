@@ -3,11 +3,14 @@ name: Windows Build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, develop]
+    tags: ["v*"]
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -47,3 +50,9 @@ jobs:
           name: project-time-manager-windows-installer
           path: release/project-time-manager.exe
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/project-time-manager.exe

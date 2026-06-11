@@ -3,6 +3,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -110,6 +111,28 @@ pub fn project_dir(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
 
 pub fn project_report_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
     project_dir(paths, project).join(format!("{}.xlsx", project_file_stem(project)))
+}
+
+pub fn project_report_pdf_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
+    project_dir(paths, project).join(format!("{}.pdf", project_file_stem(project)))
+}
+
+pub fn reserve_report_path(path: &Path) -> PathBuf {
+    if path.exists() && !can_write_target(path) {
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("report");
+        let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("bin");
+        let stamp = Utc::now().format("%Y%m%d-%H%M%S");
+        let fallback = path.with_file_name(format!("{stem}-{stamp}.{ext}"));
+        if let Some(parent) = fallback.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fallback
+    } else {
+        path.to_path_buf()
+    }
 }
 
 pub fn project_path_by_id(paths: &StoragePaths, project_id: &str) -> Result<PathBuf, String> {
@@ -444,6 +467,10 @@ fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     let mut file = fs::File::create(path).map_err(|err| err.to_string())?;
     file.write_all(content.as_bytes())
         .map_err(|err| err.to_string())
+}
+
+fn can_write_target(path: &Path) -> bool {
+    OpenOptions::new().read(true).write(true).open(path).is_ok()
 }
 
 fn migrate_legacy_storage(paths: &StoragePaths) -> Result<(), String> {
