@@ -34,10 +34,10 @@ pub fn capture_active_window() -> Option<WindowObservation> {
 
         let handle: HANDLE = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
             Ok(handle) => handle,
-            Err(_) => return Some(build_observation("unknown", "", window_title)),
+            Err(_) => return Some(build_observation("unknown", "", window_title, hwnd)),
         };
         if handle.is_invalid() {
-            return Some(build_observation("unknown", "", window_title));
+            return Some(build_observation("unknown", "", window_title, hwnd));
         }
 
         let mut buffer = [0u16; 260];
@@ -66,6 +66,7 @@ pub fn capture_active_window() -> Option<WindowObservation> {
             &process_name,
             &process_path,
             window_title,
+            hwnd,
         ))
     }
 }
@@ -80,8 +81,14 @@ fn build_observation(
     process_name: &str,
     process_path: &str,
     window_title: String,
+    hwnd: windows::Win32::Foundation::HWND,
 ) -> WindowObservation {
     let browser_name = classify_browser(process_name);
+    let url = browser_name
+        .as_ref()
+        .and_then(|_| browser_active_url(hwnd))
+        .filter(|value| looks_like_url(value));
+    let favicon_url = url.as_deref().and_then(favicon_url);
     let tab_title = browser_name
         .as_ref()
         .map(|browser| strip_browser_suffix(&window_title, browser))
@@ -94,8 +101,95 @@ fn build_observation(
         window_title,
         browser_name,
         tab_title,
-        url: None,
+        url,
+        favicon_url,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn browser_active_url(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
+    use windows::core::VARIANT;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationValuePattern, TreeScope_Descendants,
+        UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_ValuePatternId,
+    };
+
+    unsafe {
+        let initialized =
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).is_ok();
+        let result = (|| {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+            let root = automation.ElementFromHandle(hwnd).ok()?;
+            let condition = automation
+                .CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    &VARIANT::from(UIA_EditControlTypeId.0),
+                )
+                .ok()?;
+            let element = root.FindFirst(TreeScope_Descendants, &condition).ok()?;
+            let value_pattern: IUIAutomationValuePattern =
+                element.GetCurrentPatternAs(UIA_ValuePatternId).ok()?;
+            let value = value_pattern.CurrentValue().ok()?.to_string();
+            normalize_url_value(&value)
+        })();
+        if initialized {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_url_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("file://")
+    {
+        return Some(trimmed.to_string());
+    }
+    if trimmed.contains('.') && !trimmed.contains(' ') {
+        return Some(format!("https://{trimmed}"));
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn looks_like_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://") || value.starts_with("file://")
+}
+
+#[cfg(target_os = "windows")]
+fn favicon_url(url: &str) -> Option<String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return None;
+    }
+    Some(format!(
+        "https://www.google.com/s2/favicons?sz=32&domain_url={}",
+        percent_encode(url)
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 #[cfg(target_os = "windows")]

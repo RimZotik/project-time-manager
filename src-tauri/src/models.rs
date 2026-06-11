@@ -18,6 +18,7 @@ pub struct TrackerPayload {
 pub struct ProjectSummary {
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub client: String,
     pub updated_at: String,
 }
@@ -26,6 +27,7 @@ pub struct ProjectSummary {
 pub struct ProjectRecord {
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub client: String,
     pub note: String,
     pub created_at: String,
@@ -54,6 +56,8 @@ pub struct TabUsageRecord {
     pub key: String,
     pub title: String,
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon_url: Option<String>,
     pub enabled: bool,
     pub time_seconds: u64,
 }
@@ -77,6 +81,7 @@ pub struct WindowObservation {
     pub browser_name: Option<String>,
     pub tab_title: Option<String>,
     pub url: Option<String>,
+    pub favicon_url: Option<String>,
 }
 
 impl ProjectRecord {

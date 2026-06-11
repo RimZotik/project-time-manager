@@ -27,7 +27,6 @@ type TrackerPayload = {
 type ProjectSummary = {
   id: string;
   name: string;
-  client: string;
   updated_at: string;
 };
 
@@ -35,6 +34,7 @@ type TabUsageRecord = {
   key: string;
   title: string;
   url: string | null;
+  favicon_url?: string | null;
   enabled: boolean;
   time_seconds: number;
 };
@@ -148,7 +148,6 @@ export default function App() {
   const [state, setState] = useState<AppState>(fallbackState);
   const [expandedApps, setExpandedApps] = useState<Record<string, boolean>>({});
   const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectClient, setNewProjectClient] = useState("");
   const [message, setMessage] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -183,6 +182,7 @@ export default function App() {
   const trackerStatus = state.tracker.status;
   const isRunning = trackerStatus === "running";
   const isPaused = trackerStatus === "paused";
+  const statusLabel = trackerStatus === "running" ? "Запись" : trackerStatus === "paused" ? "Пауза" : "Остановлено";
 
   const totals = useMemo(() => {
     const appTime = apps.reduce((sum, app) => sum + appIncludedSeconds(app), 0);
@@ -201,15 +201,14 @@ export default function App() {
   async function createProject() {
     if (!newProjectName.trim()) return;
     await invokeCommand<ProjectSummary | null>(
-      "create_project",
-      {
-        name: newProjectName.trim(),
-        client: newProjectClient.trim(),
-      },
-      null,
-    );
+        "create_project",
+        {
+          name: newProjectName.trim(),
+          client: "",
+        },
+        null,
+      );
     setNewProjectName("");
-    setNewProjectClient("");
     setMessage("Проект создан.");
     refresh();
   }
@@ -265,13 +264,13 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
+      className="h-screen min-h-[760px] overflow-hidden bg-[linear-gradient(180deg,#f8fbf8_0%,#eef6ef_100%)] text-slate-900"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-5 py-5 lg:px-6">
-        <main className="grid min-h-0 flex-1 grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col gap-4 overflow-hidden px-4 py-4 lg:px-5">
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col gap-5">
-            <section className="rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <section className="flex min-h-0 flex-[1.15] flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-900">Проекты</h2>
                 <button className="icon-button" onClick={refresh} title="Обновить">
@@ -286,19 +285,13 @@ export default function App() {
                   onChange={(event) => setNewProjectName(event.target.value)}
                   placeholder="Название проекта"
                 />
-                <input
-                  className="field"
-                  value={newProjectClient}
-                  onChange={(event) => setNewProjectClient(event.target.value)}
-                  placeholder="Клиент или метка"
-                />
                 <button className="primary-button" onClick={createProject}>
                   <FolderPlus size={16} />
                   Создать
                 </button>
               </div>
 
-              <div className="mt-4 max-h-[calc(100vh-390px)] overflow-auto pr-1">
+              <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-auto pr-1">
                 <div className="grid gap-2">
                   {state.projects.length ? (
                     state.projects.map((project) => (
@@ -313,9 +306,9 @@ export default function App() {
                       >
                         <span className="min-w-0">
                           <strong className="block truncate text-sm text-slate-900">{project.name}</strong>
-                          <span className="block truncate text-xs text-slate-500">{project.client || "Без клиента"}</span>
+                          <span className="block truncate text-xs text-slate-500">Обновлен: {formatDateTime(project.updated_at)}</span>
                         </span>
-                        <small className="shrink-0 text-xs text-slate-400">{formatDateTime(project.updated_at)}</small>
+                        <ChevronRight className="shrink-0 text-slate-300" size={15} />
                       </button>
                     ))
                   ) : (
@@ -325,14 +318,15 @@ export default function App() {
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <section className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <SectionTitle icon={<TimerReset size={16} />} title="Сеансы" />
-              <div className="mt-3 grid gap-2">
+              <div className="stable-scroll mt-3 min-h-0 flex-1 overflow-auto pr-1">
+                <div className="grid gap-2">
                 {sessions.length ? (
                   sessions.map((session) => (
                     <article key={session.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <strong className="block text-sm text-slate-900">
-                        {formatDateTime(session.started_at)} - {formatDateTime(session.stopped_at)}
+                        {formatDateTime(session.started_at)} — {formatDateTime(session.stopped_at)}
                       </strong>
                       <span className="mt-1 block text-sm text-slate-500">{formatDuration(session.duration_seconds)}</span>
                     </article>
@@ -340,49 +334,50 @@ export default function App() {
                 ) : (
                   <EmptyState text="Сеансы появятся после старта записи." />
                 )}
+                </div>
               </div>
             </section>
           </aside>
 
-          <section className="grid min-h-0 content-start gap-5">
-            <section className="rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden">
+            <section className="rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_auto_auto] xl:items-center">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl font-semibold text-slate-900">{selectedProject?.name ?? "Project Time Manager"}</h1>
                     <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase text-emerald-700">
                       <Activity size={13} />
-                      {trackerStatus}
+                      {statusLabel}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-500">{selectedProject?.client || "Выбери проект и запускай запись времени."}</p>
+                  <p className="text-sm text-slate-500">Выбери проект, запусти запись и отслеживай активные окна.</p>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                   <button className="primary-button" onClick={() => toggleTracking("start_tracking")} disabled={isRunning || !selectedProject}>
                     <CirclePlay size={16} />
-                    {isPaused ? "Resume" : "Start"}
+                    {isPaused ? "Продолжить" : "Старт"}
                   </button>
                   <button className="secondary-button" onClick={() => toggleTracking("pause_tracking")} disabled={!isRunning || !selectedProject}>
                     <CirclePause size={16} />
-                    Pause
+                    Пауза
                   </button>
                   <button className="secondary-button" onClick={() => toggleTracking("stop_tracking")} disabled={(!isRunning && !isPaused) || !selectedProject}>
                     <Square size={16} />
-                    Stop
+                    Стоп
                   </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <button className="secondary-button" onClick={() => importInputRef.current?.click()}>
                     <Import size={16} />
-                    JSON
+                    Импорт JSON
                   </button>
                   <button className="secondary-button" onClick={exportXlsx}>
                     <Download size={16} />
-                    Excel
+                    Экспорт Excel
                   </button>
-                  <button className="secondary-button opacity-50" disabled title="PDF export пока не включен">
+                  <button className="secondary-button opacity-50" disabled title="Экспорт PDF пока не включен">
                     <FileText size={16} />
                     PDF
                   </button>
@@ -401,10 +396,10 @@ export default function App() {
                   <Metric label="Сеансов" value={String(sessions.length)} accent="emerald" />
                 </section>
 
-                <section className="rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <section className="flex min-h-0 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                   <SectionTitle icon={<Activity size={16} />} title="Приложения и вкладки" />
 
-                  <div className="mt-4 grid gap-2">
+                  <div className="mt-4 grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden">
                     <div className="grid grid-cols-[36px_minmax(120px,1fr)_86px_52px] gap-2 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400 sm:grid-cols-[44px_minmax(220px,1fr)_110px_72px] sm:gap-3 sm:px-4">
                       <span />
                       <span>Приложение</span>
@@ -412,7 +407,7 @@ export default function App() {
                       <span>%</span>
                     </div>
 
-                    <div className="max-h-[46vh] overflow-auto pr-1">
+                    <div className="stable-scroll min-h-0 overflow-auto pr-1">
                       <div className="grid gap-2">
                         {apps.map((app) => {
                           const appTotal = appIncludedSeconds(app);
@@ -431,7 +426,7 @@ export default function App() {
                                   <span className="min-w-0">
                                     <strong className="block truncate text-sm text-slate-900">{app.name}</strong>
                                     <small className="block truncate text-xs text-slate-500">
-                                      {app.kind === "browser" ? "Browser" : app.process_path || app.process_name}
+                                      {app.kind === "browser" ? "Браузер" : app.process_path || app.process_name}
                                     </small>
                                   </span>
                                   {app.kind === "browser" ? (
@@ -454,9 +449,12 @@ export default function App() {
                                         checked={tab.enabled}
                                         onChange={(checked) => toggleTab(selectedProject.id, app.key, tab.key, checked)}
                                       />
-                                      <span className="min-w-0">
+                                      <span className="flex min-w-0 items-center gap-3">
+                                        <TabIcon tab={tab} />
+                                        <span className="min-w-0">
                                         <strong className="block truncate text-sm text-slate-900">{tab.title}</strong>
                                         <small className="block truncate text-xs text-slate-500">{tab.url || "URL недоступен"}</small>
+                                        </span>
                                       </span>
                                       <span className="font-mono text-sm text-slate-700">{formatDuration(tab.time_seconds)}</span>
                                       <span className="text-sm text-slate-500">{percentOf(totals.appTime, tabIncludedSeconds(app, tab))}</span>
@@ -510,6 +508,14 @@ function AppIcon({ app }: { app: AppUsageRecord }) {
   return (
     <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-sm font-semibold text-emerald-700">
       {iconForName(app.name)}
+    </span>
+  );
+}
+
+function TabIcon({ tab }: { tab: TabUsageRecord }) {
+  return (
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-xs font-semibold text-emerald-700">
+      {tab.favicon_url ? <img className="size-4 object-contain" src={tab.favicon_url} alt="" draggable={false} /> : "W"}
     </span>
   );
 }

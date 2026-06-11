@@ -176,7 +176,7 @@ fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportRe
         selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
     let output = state.paths.root.join("exports");
     std::fs::create_dir_all(&output).map_err(|err| err.to_string())?;
-    let file_name = sanitize_file_name(&project.name);
+    let file_name = project_file_stem(&project);
     let path = output.join(format!("{file_name}.xlsx"));
     export_project_xlsx(&project, path.clone())?;
     Ok(ExportResult {
@@ -243,22 +243,6 @@ fn finalize_session(state: &State<'_, AppRuntime>) -> Result<(), String> {
     project.updated_at = now_iso();
     save_project(&state.paths, project)?;
     Ok(())
-}
-
-fn sanitize_file_name(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else if ch.is_whitespace() {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "project".to_string()
-    } else {
-        out
-    }
 }
 
 fn tracker_loop(state: tauri::State<'_, AppRuntime>) {

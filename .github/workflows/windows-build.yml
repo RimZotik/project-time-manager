@@ -29,9 +29,21 @@ jobs:
       - name: Build Windows installer
         run: npm run tauri:build
 
+      - name: Normalize installer name
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $installer = Get-ChildItem -Path "src-tauri/target" -Recurse -Filter "*.exe" |
+            Where-Object { $_.FullName -like "*\bundle\nsis\*" } |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not found"
+          }
+          Copy-Item $installer.FullName "release/project-time-manager.exe"
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: project-time-manager-windows-installer
-          path: src-tauri/target/**/bundle/nsis/*.exe
+          path: release/project-time-manager.exe
           if-no-files-found: error
