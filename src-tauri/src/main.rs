@@ -16,13 +16,13 @@ use std::time::Duration;
 use tauri::{Manager, State};
 use uuid::Uuid;
 #[cfg(target_os = "windows")]
-use windows::core::PCWSTR;
+use ::windows::core::PCWSTR;
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::HWND;
+use ::windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Shell::ShellExecuteW;
+use ::windows::Win32::UI::Shell::ShellExecuteW;
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use ::windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 struct TrackerDraft {
     started_at: String,
