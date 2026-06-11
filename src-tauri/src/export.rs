@@ -140,7 +140,6 @@ impl ReportStyles {
                 .set_border(FormatBorder::Thin)
                 .set_border_color(Color::RGB(0xCBD5E1)),
             timeline_empty: Format::new()
-                .set_background_color(Color::RGB(0xF8FAFC))
                 .set_border(FormatBorder::Thin)
                 .set_border_color(Color::RGB(0xE2E8F0)),
             timeline_block: Format::new()
@@ -174,6 +173,10 @@ fn write_report_sheet(
     worksheet.set_column_width(10, 12).map_err(format_xlsx_error)?;
     worksheet.set_column_width(12, 24).map_err(format_xlsx_error)?;
     worksheet.set_column_width(13, 12).map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(9).map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(10).map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(12).map_err(format_xlsx_error)?;
+    worksheet.set_column_hidden(13).map_err(format_xlsx_error)?;
 
     let total_seconds: u64 = apps.iter().map(|app| app.seconds).sum();
 
@@ -223,7 +226,7 @@ fn write_report_sheet(
 
     if !apps.is_empty() {
         let last_row = 8 + apps.len().min(8) as u32 - 1;
-        let mut chart = Chart::new(ChartType::Bar);
+        let mut chart = Chart::new(ChartType::Pie);
         chart.title().set_name("Приложения проекта");
         chart.set_style(10);
         chart
@@ -286,7 +289,7 @@ fn write_tabs_sheet(
     styles: &ReportStyles,
 ) -> Result<(), String> {
     let worksheet = workbook.add_worksheet();
-    worksheet.set_name("Вкладки").map_err(format_xlsx_error)?;
+    worksheet.set_name("Сайты").map_err(format_xlsx_error)?;
     worksheet.set_column_width(0, 22).map_err(format_xlsx_error)?;
     worksheet.set_column_width(1, 42).map_err(format_xlsx_error)?;
     worksheet.set_column_width(2, 48).map_err(format_xlsx_error)?;
@@ -417,9 +420,18 @@ fn write_stages_sheet(
         let slot_count = timeline_slot_count(timeline_start, timeline_end, slot_seconds);
         let header_row = stages.len() as u32 + 4;
         let axis_row = header_row + 1;
+        let timeline_last_col = 3 + slot_count.saturating_sub(1) as u16;
+        let header_last_col = timeline_last_col.max(6);
 
         worksheet
-            .merge_range(header_row, 0, header_row, 6, "Таймлайн этапов", &styles.section)
+            .merge_range(
+                header_row,
+                0,
+                header_row,
+                header_last_col,
+                "Таймлайн этапов",
+                &styles.section,
+            )
             .map_err(format_xlsx_error)?;
         worksheet.write_string_with_format(axis_row, 0, "Этап", &styles.header).map_err(format_xlsx_error)?;
         worksheet.write_string_with_format(axis_row, 1, "Сеансов", &styles.header).map_err(format_xlsx_error)?;
