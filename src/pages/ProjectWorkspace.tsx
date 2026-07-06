@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
 
 type TrackerStatus = "stopped" | "paused" | "running";
 
@@ -834,6 +835,7 @@ export default function ProjectWorkspace() {
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
   const [renameProject, setRenameProject] = useState<RenameState | null>(null);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [modal, setModal] = useState<"settings" | "help" | "stages" | null>(
     null,
   );
@@ -885,6 +887,9 @@ export default function ProjectWorkspace() {
   const t = copy[language];
   const apps = selectedProject?.apps ?? [];
   const sessions = selectedProject?.sessions ?? [];
+  const filteredProjects = categoryFilter
+    ? state.projects.filter((project) => project.category_id === categoryFilter)
+    : state.projects;
   const trackerStatus = state.tracker.status;
   const isRunning = trackerStatus === "running";
   const isPaused = trackerStatus === "paused";
@@ -1344,10 +1349,42 @@ export default function ProjectWorkspace() {
                 </div>
               </div>
 
-              <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-y-scroll pr-1">
+              {state.categories.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setCategoryFilter(null)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      categoryFilter === null
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-100 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
+                    }`}
+                  >
+                    {language === "en" ? "All" : "Все"}
+                  </button>
+                  {state.categories.map((category) => (
+                    <button
+                      key={category.id}
+                      onClick={() => setCategoryFilter(category.id)}
+                      className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                        categoryFilter === category.id
+                          ? "bg-emerald-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                      }`}
+                    >
+                      <span
+                        className="size-2 rounded-full"
+                        style={{ background: category.color }}
+                      />
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="stable-scroll mt-3 min-h-0 flex-1 overflow-y-scroll pr-1">
                 <div className="grid w-full gap-2">
-                  {state.projects.length ? (
-                    state.projects.map((project) => (
+                  {filteredProjects.length ? (
+                    filteredProjects.map((project) => (
                       <div key={project.id}>
                         <div
                           className={`flex w-full items-center justify-between gap-2 rounded-2xl border px-3 py-3 text-left transition ${
@@ -1492,38 +1529,12 @@ export default function ProjectWorkspace() {
 
                 <div className="flex items-center justify-end">
                   {selectedProject && (
-                    <label
-                      className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2"
-                      title={t.categoryLabel}
-                    >
-                      <span
-                        className="size-3 shrink-0 rounded-full"
-                        style={{
-                          background:
-                            state.categories.find(
-                              (c) => c.id === selectedProject.category_id,
-                            )?.color ?? "#cbd5e1",
-                        }}
-                      />
-                      <select
-                        className="max-w-[180px] bg-transparent text-sm font-medium text-slate-700 outline-none"
-                        value={selectedProject.category_id ?? ""}
-                        onChange={(event) =>
-                          assignCategory(
-                            selectedProject.id,
-                            event.target.value || null,
-                          )
-                        }
-                      >
-                        <option value="">{t.noCategory}</option>
-                        {state.categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.icon ? `${category.icon} ` : ""}
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <CategoryPicker
+                      categories={state.categories}
+                      value={selectedProject.category_id ?? null}
+                      language={language}
+                      onChange={(id) => assignCategory(selectedProject.id, id)}
+                    />
                   )}
                 </div>
               </div>
@@ -2495,6 +2506,84 @@ const CATEGORY_PALETTE = [
   "#dc2626",
 ];
 
+function CategoryRow({
+  category,
+  language,
+  onUpdate,
+  onDelete,
+}: {
+  category: Category;
+  language: "ru" | "en";
+  onUpdate: (id: string, name: string, color: string, icon: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const t = copy[language];
+  const [name, setName] = useState(category.name);
+  const [confirming, setConfirming] = useState(false);
+
+  // Синхронизируем локальное имя, если категория обновилась извне.
+  useEffect(() => {
+    setName(category.name);
+  }, [category.name]);
+
+  function commitName() {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== category.name) {
+      onUpdate(category.id, trimmed, category.color, category.icon);
+    } else if (!trimmed) {
+      setName(category.name);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2.5 rounded-2xl border border-slate-200 px-3 py-2">
+      <input
+        type="color"
+        value={category.color}
+        onChange={(event) =>
+          onUpdate(category.id, category.name, event.target.value, category.icon)
+        }
+        className="size-8 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5"
+        title={t.categoryLabel}
+      />
+      <input
+        className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-slate-800 outline-none transition-colors hover:border-slate-200 focus:border-emerald-300 focus:bg-white"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        onBlur={commitName}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") setName(category.name);
+        }}
+      />
+      {confirming ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            onClick={() => onDelete(category.id)}
+            className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700"
+          >
+            {t.stageDeleteLabel}
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            className="grid size-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          title={t.deleteCategoryConfirm}
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+        >
+          <Trash2 size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CategoryManagerModal({
   categories,
   language,
@@ -2587,38 +2676,13 @@ function CategoryManagerModal({
           <div className="max-h-[45vh] space-y-2 overflow-y-auto">
             {categories.length ? (
               categories.map((category) => (
-                <div
+                <CategoryRow
                   key={category.id}
-                  className="flex items-center gap-3 rounded-2xl border border-slate-200 px-3 py-2.5"
-                >
-                  <input
-                    type="color"
-                    value={category.color}
-                    onChange={(event) =>
-                      onUpdate(
-                        category.id,
-                        category.name,
-                        event.target.value,
-                        category.icon,
-                      )
-                    }
-                    className="size-8 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
-                    {category.icon ? `${category.icon} ` : ""}
-                    {category.name}
-                  </span>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(t.deleteCategoryConfirm)) {
-                        onDelete(category.id);
-                      }
-                    }}
-                    className="grid size-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
+                  category={category}
+                  language={language}
+                  onUpdate={onUpdate}
+                  onDelete={onDelete}
+                />
               ))
             ) : (
               <EmptyState text={t.categoryEmpty} />
@@ -2626,6 +2690,92 @@ function CategoryManagerModal({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function CategoryPicker({
+  categories,
+  value,
+  language,
+  onChange,
+}: {
+  categories: Category[];
+  value: string | null;
+  language: "ru" | "en";
+  onChange: (categoryId: string | null) => void;
+}) {
+  const t = copy[language];
+  const [open, setOpen] = useState(false);
+  const current = categories.find((c) => c.id === value) ?? null;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex min-w-[180px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-emerald-200"
+      >
+        <span
+          className="size-3 shrink-0 rounded-full"
+          style={{ background: current?.color ?? "#cbd5e1" }}
+        />
+        <span className="min-w-0 flex-1 truncate text-left">
+          {current ? `${current.icon ? `${current.icon} ` : ""}${current.name}` : t.noCategory}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.14 }}
+            className="absolute right-0 z-50 mt-2 max-h-72 w-64 overflow-y-auto rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+          >
+            <button
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-emerald-50"
+            >
+              <span className="size-3 shrink-0 rounded-full border-2 border-slate-300" />
+              <span className="min-w-0 flex-1 truncate text-slate-600">
+                {t.noCategory}
+              </span>
+              {value === null && <Check size={15} className="text-emerald-600" />}
+            </button>
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                onClick={() => {
+                  onChange(category.id);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-emerald-50"
+              >
+                <span
+                  className="size-3 shrink-0 rounded-full"
+                  style={{ background: category.color }}
+                />
+                <span className="min-w-0 flex-1 truncate text-slate-700">
+                  {category.icon ? `${category.icon} ` : ""}
+                  {category.name}
+                </span>
+                {value === category.id && (
+                  <Check size={15} className="text-emerald-600" />
+                )}
+              </button>
+            ))}
+          </motion.div>
+        </>
+      )}
     </div>
   );
 }
