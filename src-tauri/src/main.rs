@@ -1,5 +1,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+// TODO(phase2): убрать allow, когда db станет основным хранилищем
+#[allow(dead_code)]
+mod db;
 mod export;
 mod models;
 mod pdf;
