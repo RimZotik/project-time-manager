@@ -6,6 +6,7 @@
 use crate::models::*;
 use crate::storage::{self, StoragePaths};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::HashMap;
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -584,6 +585,85 @@ pub fn set_project_category(
     )
     .map(|_| ())
     .map_err(|e| e.to_string())
+}
+
+// ── Правила автокатегоризации ───────────────────────────────────────────────
+
+pub fn list_rules(conn: &Connection) -> Result<Vec<AppRule>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, match_process, category_id, created_at FROM app_rule ORDER BY created_at")
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<AppRule> = stmt
+        .query_map([], |r| {
+            Ok(AppRule {
+                id: r.get::<_, String>(0)?,
+                match_process: r.get::<_, String>(1)?,
+                category_id: r.get::<_, String>(2)?,
+                created_at: r.get::<_, String>(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+pub fn insert_rule(conn: &Connection, rule: &AppRule) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_rule(id, match_process, category_id, created_at)
+         VALUES(?1, ?2, ?3, ?4)",
+        params![rule.id, rule.match_process, rule.category_id, rule.created_at],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+pub fn delete_rule(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM app_rule WHERE id = ?1", params![id])
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Подсказать категорию проекта: сумма времени приложений, чьи имена/процессы
+/// подходят под правила, по категориям — берём категорию с максимумом.
+pub fn suggest_category(conn: &Connection, project_id: &str) -> Result<Option<String>, String> {
+    let rules = list_rules(conn)?;
+    if rules.is_empty() {
+        return Ok(None);
+    }
+    let apps: Vec<(String, String, i64)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT process_name, name, time_seconds FROM app_usage
+                 WHERE project_id = ?1 AND enabled = 1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String, i64)> = stmt
+            .query_map(params![project_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let mut scores: HashMap<String, u64> = HashMap::new();
+    for (proc_name, name, secs) in apps {
+        let p = proc_name.to_lowercase();
+        let n = name.to_lowercase();
+        for rule in &rules {
+            let m = rule.match_process.trim().to_lowercase();
+            if !m.is_empty() && (p.contains(&m) || n.contains(&m)) {
+                *scores.entry(rule.category_id.clone()).or_default() += secs.max(0) as u64;
+            }
+        }
+    }
+    Ok(scores.into_iter().max_by_key(|(_, v)| *v).map(|(k, _)| k))
 }
 
 /// Сохранить проект: строка проекта обновляется (категория и цвет

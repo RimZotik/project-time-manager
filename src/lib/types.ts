@@ -126,6 +126,13 @@ export type SessionLite = {
 
 export type AppTotal = { name: string; kind: string; seconds: number };
 
+export type AppRule = {
+  id: string;
+  match_process: string;
+  category_id: string;
+  created_at: string;
+};
+
 export type ActiveWindowInfo = {
   name: string;
   process_name: string;

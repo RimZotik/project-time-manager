@@ -42,6 +42,15 @@ pub struct AppTotal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppRule {
+    pub id: String,
+    pub match_process: String,
+    pub category_id: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActiveWindowInfo {
     pub name: String,
     pub process_name: String,

@@ -2,125 +2,54 @@
 
 [README на русском](README.md)
 
-Project Time Manager is a Windows desktop time tracker for project work. You select a project, start tracking, and the app measures which applications and browser sites were active while you worked.
+**Project Time Manager** is a desktop time tracker for Windows. It measures not just "time at the computer" but the **real time spent on a specific project**: which apps, browser tabs and sites were active, and which project stages the work belonged to — so you can view rich analytics and reports right inside the app.
 
-![Project Time Manager screenshot](docs/screenshot.png)
+> The app targets Windows (real active-window tracking via WinAPI). On macOS/Linux the UI opens for development, but active-window tracking is unavailable.
 
 ## Features
 
-- Create, select, rename, and delete projects.
-- Track work sessions: start, pause, and stop.
-- Capture the active Windows foreground window through WinAPI.
-- Show apps with real icons, time, and percentage of project time.
-- Expand browsers into site groups and store visited links for every site.
-- Include or exclude apps and sites from totals without deleting raw time.
-- Export Excel and PDF reports.
-- Store runtime data next to the app in the `data` folder.
-- Switch the interface between Russian and English.
-- Enable Windows autostart.
+- **Projects** with categories (e.g. Editing, Programming) — color, icon, category filter.
+- **Time tracking**: start / pause / stop, with a recording indicator always visible top-right.
+- **Activity tracking** (Windows): active window, apps with real icons, browsers expanded to sites and visited links.
+- **Include / exclude** apps, sites and links from totals without deleting the data.
+- **Project stages**: chosen before a session; time is split across stages.
+- **Reports with a timeline** — editing-software style: tracks by stage and by session, wheel zoom, scroll, drag.
+- **Analytics** across projects: time by project, by category (donut), daily activity, an hour×weekday heatmap, top apps.
+- **Dashboard**: live recording status with a clock, KPIs, top projects, weekly activity, quick start.
+- **Monitoring**: current active window, session clock, live app list.
+- **Auto-categorization**: "app → category" rules and a "Detect category from apps" action on a project.
+- **Automatic DB backup** on startup (keeps the last 10 copies).
+- **Settings**: language (Russian / English), Windows autostart, data folder.
 
-## Data Location
+## Data
 
-After installation, the app creates this folder next to the executable:
+Stored in a SQLite database next to the executable:
 
 ```text
 data/
-  workspace.json
-  Проекты/
-    <Project name>/
-      project.json
-      <Project name>.xlsx
-      <Project name>.pdf
+  ptm.db      # main database
+  backups/    # automatic backups (last 10)
 ```
 
-When a project is renamed, the project folder and newly generated reports use the project name.
+On first launch, legacy JSON data from earlier versions (`data/workspace.json`, `data/Проекты/<Name>/project.json`) is **migrated automatically**.
 
-## How To Use
+## Install (Windows)
 
-1. Create a project in the left column or select an existing one.
-2. Press `Start`.
-3. Work as usual: editing, development, browser research, documents.
-4. Disable checkboxes for apps or sites that should not count toward totals.
-5. Press `Pause` or `Stop`.
-6. Export an Excel or PDF report.
+Download `project-time-manager.exe` from the latest [release](../../releases/latest) and run it.
 
-Import and export are disabled during active tracking so reports are not generated from half-written data.
+## Tech stack
 
-## For Developers
+Tauri 2 + Rust, React 19 + TypeScript + Vite + Tailwind CSS 4, SQLite (`rusqlite`), WinAPI (`windows` crate), `framer-motion`.
 
-### Stack
-
-- Tauri 2
-- Rust backend
-- React + TypeScript
-- Vite
-- Tailwind CSS
-- `rust_xlsxwriter` for Excel
-- `printpdf` for PDF
-- WinAPI through the `windows` crate
-
-### Local Development
+## Development
 
 ```bash
 npm install
 npm run tauri:dev
+npm run build                # typecheck + frontend build
+cd src-tauri && cargo test   # backend tests
 ```
 
-On macOS and Linux the UI can run, but real active-window tracking is Windows-only.
+## Build & release
 
-### Build
-
-Build for the current OS:
-
-```bash
-npm run tauri:build
-```
-
-Windows builds are best produced on Windows or through GitHub Actions:
-
-```text
-.github/workflows/windows-build.yml
-```
-
-The workflow builds an NSIS installer and attaches `project-time-manager.exe` to GitHub Releases for tags that match `v*`.
-
-### Structure
-
-```text
-src/
-  App.tsx              # main React UI, localization, state handling
-  main.tsx             # frontend entry point
-  index.css            # Tailwind and shared styles
-
-src-tauri/src/
-  main.rs              # Tauri commands, tracking, settings
-  storage.rs           # file storage, migrations, projects
-  windows.rs           # WinAPI: active window, process, URL/icons
-  export.rs            # Excel
-  pdf.rs               # PDF
-  models.rs            # shared data models
-
-src-tauri/windows/
-  nsis-hooks.nsh       # installer and uninstaller hooks
-```
-
-### Release
-
-1. Update versions in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Verify the build:
-
-```bash
-npm run build
-cd src-tauri
-cargo check
-cargo test
-```
-
-3. Create a tag:
-
-```bash
-git tag v0.1.7
-git push origin develop --tags
-```
-
-4. GitHub Actions builds the Windows installer and creates the Release.
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/windows-build.yml`, which builds the NSIS installer and publishes a GitHub Release with `project-time-manager.exe`.

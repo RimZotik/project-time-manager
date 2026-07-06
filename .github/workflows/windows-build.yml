@@ -3,7 +3,6 @@ name: Windows Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, develop]
     tags: ["v*"]
 
 jobs:
@@ -25,6 +24,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Install frontend dependencies
         run: npm install
@@ -56,3 +60,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/project-time-manager.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true

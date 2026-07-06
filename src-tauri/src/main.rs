@@ -74,6 +74,33 @@ fn list_categories(state: State<'_, AppRuntime>) -> Result<Vec<Category>, String
 }
 
 #[tauri::command]
+fn list_app_rules(state: State<'_, AppRuntime>) -> Result<Vec<AppRule>, String> {
+    storage::list_app_rules(&state.paths)
+}
+
+#[tauri::command]
+fn create_app_rule(
+    state: State<'_, AppRuntime>,
+    match_process: String,
+    category_id: String,
+) -> Result<AppRule, String> {
+    storage::create_app_rule(&state.paths, &match_process, &category_id)
+}
+
+#[tauri::command]
+fn delete_app_rule(state: State<'_, AppRuntime>, id: String) -> Result<(), String> {
+    storage::delete_app_rule(&state.paths, &id)
+}
+
+#[tauri::command]
+fn suggest_project_category(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+) -> Result<Option<String>, String> {
+    storage::suggest_project_category(&state.paths, &project_id)
+}
+
+#[tauri::command]
 fn get_active_window() -> Option<ActiveWindowInfo> {
     windows::capture_active_window().map(|o| ActiveWindowInfo {
         name: friendly_app_name(&o.process_name, &o.process_path, o.browser_name.as_deref()),
@@ -704,6 +731,7 @@ fn main() {
     let paths = storage_paths().expect("failed to resolve storage paths");
     ensure_storage(&paths).expect("failed to create storage");
     migrate_legacy_if_needed(&paths).expect("failed to migrate legacy data");
+    let _ = backup_database(&paths);
     let store = load_store(&paths).expect("failed to load store");
     let _ = set_autostart_enabled(store.workspace.autostart);
     let tracker = TrackerRuntime {
@@ -749,6 +777,10 @@ fn main() {
             list_categories,
             get_analytics,
             get_active_window,
+            list_app_rules,
+            create_app_rule,
+            delete_app_rule,
+            suggest_project_category,
             create_category,
             update_category,
             delete_category,

@@ -73,6 +73,47 @@ pub fn ensure_storage(paths: &StoragePaths) -> Result<(), String> {
     crate::db::connect(&paths.db_file).map(|_| ())
 }
 
+/// Резервная копия базы: checkpoint WAL, копия в data/backups с меткой
+/// времени, хранение последних 10 копий. Безопасно вызывать при старте.
+pub fn backup_database(paths: &StoragePaths) -> Result<(), String> {
+    if !paths.db_file.exists() {
+        return Ok(());
+    }
+    // Сбрасываем WAL в основной файл, чтобы копия была полной.
+    {
+        let conn = crate::db::connect(&paths.db_file)?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+    let dir = paths
+        .db_file
+        .parent()
+        .map(|p| p.join("backups"))
+        .ok_or("no data dir")?;
+    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+
+    let stamp = Utc::now().format("%Y%m%d-%H%M%S");
+    let dest = dir.join(format!("ptm-{stamp}.db"));
+    fs::copy(&paths.db_file, &dest).map_err(|err| err.to_string())?;
+
+    // Оставляем только последние 10 копий.
+    let mut backups: Vec<PathBuf> = fs::read_dir(&dir)
+        .map_err(|err| err.to_string())?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("ptm-") && n.ends_with(".db"))
+                .unwrap_or(false)
+        })
+        .collect();
+    backups.sort();
+    while backups.len() > 10 {
+        let oldest = backups.remove(0);
+        let _ = fs::remove_file(oldest);
+    }
+    Ok(())
+}
+
 /// При первом запуске: если база пуста, но рядом лежат старые JSON-данные —
 /// переносим их в SQLite. Вызывается один раз из main().
 pub fn migrate_legacy_if_needed(paths: &StoragePaths) -> Result<(), String> {
@@ -236,6 +277,46 @@ pub fn set_project_category(
     crate::db::set_project_category(&conn, project_id, category_id, &now_iso())?;
     drop(conn);
     load_project(paths, project_id)
+}
+
+// ── Правила автокатегоризации (обёртки над db) ──────────────────────────────
+
+pub fn list_app_rules(paths: &StoragePaths) -> Result<Vec<AppRule>, String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::list_rules(&conn)
+}
+
+pub fn create_app_rule(
+    paths: &StoragePaths,
+    match_process: &str,
+    category_id: &str,
+) -> Result<AppRule, String> {
+    let trimmed = match_process.trim();
+    if trimmed.is_empty() || category_id.trim().is_empty() {
+        return Err("Укажите приложение и категорию.".to_string());
+    }
+    let conn = crate::db::connect(&paths.db_file)?;
+    let rule = AppRule {
+        id: Uuid::new_v4().to_string(),
+        match_process: trimmed.to_string(),
+        category_id: category_id.to_string(),
+        created_at: now_iso(),
+    };
+    crate::db::insert_rule(&conn, &rule)?;
+    Ok(rule)
+}
+
+pub fn delete_app_rule(paths: &StoragePaths, id: &str) -> Result<(), String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::delete_rule(&conn, id)
+}
+
+pub fn suggest_project_category(
+    paths: &StoragePaths,
+    project_id: &str,
+) -> Result<Option<String>, String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::suggest_category(&conn, project_id)
 }
 
 pub fn project_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {

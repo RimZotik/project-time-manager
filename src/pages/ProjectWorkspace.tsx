@@ -20,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   Settings,
+  Sparkles,
   Square,
   Tags,
   TimerReset,
@@ -223,6 +224,7 @@ const copy = {
     reportsLabel: "Отчёты",
     reportsSoon: "Таймлайн проекта и отчёты появятся здесь.",
     deleteProjectLabel: "Удалить проект",
+    suggestCategoryLabel: "Определить по приложениям",
     createLabel: "Создать",
     projectNamePlaceholder: "Название проекта",
     statusRunning: "Запись",
@@ -347,6 +349,7 @@ const copy = {
     reportsLabel: "Reports",
     reportsSoon: "The project timeline and reports will live here.",
     deleteProjectLabel: "Delete project",
+    suggestCategoryLabel: "Detect from apps",
     createLabel: "Create",
     projectNamePlaceholder: "Project name",
     statusRunning: "Recording",
@@ -976,6 +979,15 @@ export default function ProjectWorkspace() {
       null,
     );
     refresh();
+  }
+
+  async function suggestCategory(projectId: string) {
+    const id = await invokeCommand<string | null>(
+      "suggest_project_category",
+      { projectId },
+      null,
+    );
+    if (id) await assignCategory(projectId, id);
   }
 
   async function createCategory(name: string, color: string, icon: string) {
@@ -1994,6 +2006,7 @@ export default function ProjectWorkspace() {
                       onChangeCategory={(id) =>
                         assignCategory(selectedProject.id, id)
                       }
+                      onSuggest={() => suggestCategory(selectedProject.id)}
                       onDelete={() => removeProject(selectedProject.id)}
                     />
                   )}
@@ -2788,6 +2801,7 @@ function ProjectSettingsPanel({
   language,
   onRename,
   onChangeCategory,
+  onSuggest,
   onDelete,
 }: {
   project: ProjectRecord;
@@ -2795,6 +2809,7 @@ function ProjectSettingsPanel({
   language: "ru" | "en";
   onRename: (name: string) => void;
   onChangeCategory: (categoryId: string | null) => void;
+  onSuggest: () => void;
   onDelete: () => void;
 }) {
   const t = copy[language];
@@ -2837,13 +2852,20 @@ function ProjectSettingsPanel({
           <h3 className="text-sm font-semibold text-slate-900">
             {t.categoryLabel}
           </h3>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center gap-2">
             <CategoryPicker
               categories={categories}
               value={project.category_id ?? null}
               language={language}
               onChange={onChangeCategory}
             />
+            <button
+              onClick={onSuggest}
+              className="inline-flex items-center gap-1.5 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+            >
+              <Sparkles size={15} />
+              {t.suggestCategoryLabel}
+            </button>
           </div>
         </section>
 
