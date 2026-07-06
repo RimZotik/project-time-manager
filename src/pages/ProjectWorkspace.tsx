@@ -217,6 +217,11 @@ const copy = {
     settingsLabel: "Настройки",
     helpLabel: "Помощь",
     stagesLabel: "Этапы",
+    tabOverviewLabel: "Обзор",
+    projectSettingsLabel: "Настройки проекта",
+    reportsLabel: "Отчёты",
+    reportsSoon: "Таймлайн проекта и отчёты появятся здесь.",
+    deleteProjectLabel: "Удалить проект",
     createLabel: "Создать",
     projectNamePlaceholder: "Название проекта",
     statusRunning: "Запись",
@@ -336,6 +341,11 @@ const copy = {
     settingsLabel: "Settings",
     helpLabel: "Help",
     stagesLabel: "Stages",
+    tabOverviewLabel: "Overview",
+    projectSettingsLabel: "Project settings",
+    reportsLabel: "Reports",
+    reportsSoon: "The project timeline and reports will live here.",
+    deleteProjectLabel: "Delete project",
     createLabel: "Create",
     projectNamePlaceholder: "Project name",
     statusRunning: "Recording",
@@ -836,6 +846,9 @@ export default function ProjectWorkspace() {
   const [renameProject, setRenameProject] = useState<RenameState | null>(null);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "apps" | "stages" | "settings" | "reports"
+  >("overview");
   const [modal, setModal] = useState<"settings" | "help" | "stages" | null>(
     null,
   );
@@ -1287,9 +1300,18 @@ export default function ProjectWorkspace() {
   }
 
   async function removeProject(projectId: string) {
-    if (!window.confirm(t.deleteConfirm)) return;
     await invokeCommand<void>("delete_project", { projectId }, undefined);
     setProjectMenu(null);
+    refresh();
+  }
+
+  async function renameProjectById(projectId: string, name: string) {
+    if (!name.trim()) return;
+    await invokeCommand<ProjectRecord | null>(
+      "rename_project",
+      { projectId, name: name.trim() },
+      null,
+    );
     refresh();
   }
 
@@ -1482,8 +1504,8 @@ export default function ProjectWorkspace() {
 
           </aside>
 
-          <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden">
-            <section className="rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <section className="flex min-h-0 flex-col gap-4 overflow-hidden">
+            <section className="shrink-0 rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="grid grid-cols-[minmax(420px,1fr)_auto_auto] items-center gap-4">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1550,41 +1572,76 @@ export default function ProjectWorkspace() {
 
             {selectedProject ? (
               <>
-                <section className="grid grid-cols-4 gap-3">
-                  <Metric
-                    label={t.totalProjectLabel}
-                    value={formatDuration(totals.appTime, language)}
-                    accent="emerald"
-                  />
-                  <Metric
-                    label={t.sessionsCountLabel}
-                    value={String(sessions.length)}
-                    accent="emerald"
-                  />
-                  <StageSelectorCard
-                    stages={[...(selectedProject.stages ?? [])].sort(
-                      (left, right) => left.order - right.order,
-                    )}
-                    selectedStageIds={selectedProject.selected_stage_ids ?? []}
-                    disabled={isStageEditingLocked}
-                    t={t}
-                    onToggle={(stageId) => {
-                      const next = selectedProject.selected_stage_ids.includes(
-                        stageId,
-                      )
-                        ? selectedProject.selected_stage_ids.filter(
-                            (item) => item !== stageId,
-                          )
-                        : [...selectedProject.selected_stage_ids, stageId];
-                      setSelectedStages(next);
-                    }}
-                    onManage={() =>
-                      setStageModal({ projectId: selectedProject.id })
-                    }
-                  />
-                </section>
+                {/* Вкладки проекта */}
+                <div className="flex shrink-0 flex-wrap gap-1 rounded-2xl border border-emerald-100 bg-white/70 p-1 backdrop-blur">
+                  {(
+                    [
+                      ["overview", t.tabOverviewLabel],
+                      ["apps", t.appsTitle],
+                      ["stages", t.stagesLabel],
+                      ["settings", t.projectSettingsLabel],
+                      ["reports", t.reportsLabel],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveTab(key)}
+                      className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                        activeTab === key
+                          ? "bg-emerald-600 text-white shadow-[0_8px_18px_rgba(5,150,105,0.22)]"
+                          : "text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-                <section className="flex min-h-0 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+                  {activeTab === "overview" && (
+                    <section className="grid grid-cols-2 gap-3">
+                      <Metric
+                        label={t.totalProjectLabel}
+                        value={formatDuration(totals.appTime, language)}
+                        accent="emerald"
+                      />
+                      <Metric
+                        label={t.sessionsCountLabel}
+                        value={String(sessions.length)}
+                        accent="emerald"
+                      />
+                    </section>
+                  )}
+
+                  {activeTab === "stages" && (
+                    <section className="grid grid-cols-1 gap-3">
+                      <StageSelectorCard
+                        stages={[...(selectedProject.stages ?? [])].sort(
+                          (left, right) => left.order - right.order,
+                        )}
+                        selectedStageIds={selectedProject.selected_stage_ids ?? []}
+                        disabled={isStageEditingLocked}
+                        t={t}
+                        onToggle={(stageId) => {
+                          const next = selectedProject.selected_stage_ids.includes(
+                            stageId,
+                          )
+                            ? selectedProject.selected_stage_ids.filter(
+                                (item) => item !== stageId,
+                              )
+                            : [...selectedProject.selected_stage_ids, stageId];
+                          setSelectedStages(next);
+                        }}
+                        onManage={() =>
+                          setStageModal({ projectId: selectedProject.id })
+                        }
+                      />
+                    </section>
+                  )}
+
+                  {activeTab === "apps" && (
+
+                <section className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                   <SectionTitle
                     icon={<Activity size={16} />}
                     title={t.appsTitle}
@@ -1922,7 +1979,30 @@ export default function ProjectWorkspace() {
                       </div>
                     </div>
                   </div>
-                </section>
+                    </section>
+                  )}
+
+                  {activeTab === "settings" && (
+                    <ProjectSettingsPanel
+                      project={selectedProject}
+                      categories={state.categories}
+                      language={language}
+                      onRename={(name) =>
+                        renameProjectById(selectedProject.id, name)
+                      }
+                      onChangeCategory={(id) =>
+                        assignCategory(selectedProject.id, id)
+                      }
+                      onDelete={() => removeProject(selectedProject.id)}
+                    />
+                  )}
+
+                  {activeTab === "reports" && (
+                    <section className="grid flex-1 place-items-center rounded-[24px] border border-dashed border-emerald-200 bg-white/60 p-8 text-center text-sm text-slate-500">
+                      {t.reportsSoon}
+                    </section>
+                  )}
+                </div>
               </>
             ) : (
               <section className="rounded-[28px] border border-dashed border-emerald-200 bg-white p-8 text-sm text-slate-500 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -1991,7 +2071,12 @@ export default function ProjectWorkspace() {
           </button>
           <button
             className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition-colors hover:bg-rose-50"
-            onClick={() => removeProject(projectMenu.projectId)}
+            onClick={async () => {
+              const id = projectMenu.projectId;
+              setProjectMenu(null);
+              if (selectedProject?.id !== id) await selectProject(id);
+              setActiveTab("settings");
+            }}
           >
             <Trash2 size={15} />
             {t.projectMenuDelete}
@@ -2690,6 +2775,106 @@ function CategoryManagerModal({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ProjectSettingsPanel({
+  project,
+  categories,
+  language,
+  onRename,
+  onChangeCategory,
+  onDelete,
+}: {
+  project: ProjectRecord;
+  categories: Category[];
+  language: "ru" | "en";
+  onRename: (name: string) => void;
+  onChangeCategory: (categoryId: string | null) => void;
+  onDelete: () => void;
+}) {
+  const t = copy[language];
+  const [name, setName] = useState(project.name);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    setName(project.name);
+  }, [project.id, project.name]);
+
+  function commitName() {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== project.name) {
+      onRename(trimmed);
+    } else if (!trimmed) {
+      setName(project.name);
+    }
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="grid max-w-xl gap-4">
+        <section className="rounded-[24px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <h3 className="text-sm font-semibold text-slate-900">
+            {t.renamePlaceholder}
+          </h3>
+          <input
+            className="field mt-3"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={commitName}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") setName(project.name);
+            }}
+          />
+        </section>
+
+        <section className="rounded-[24px] border border-emerald-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <h3 className="text-sm font-semibold text-slate-900">
+            {t.categoryLabel}
+          </h3>
+          <div className="mt-3">
+            <CategoryPicker
+              categories={categories}
+              value={project.category_id ?? null}
+              language={language}
+              onChange={onChangeCategory}
+            />
+          </div>
+        </section>
+
+        <section className="rounded-[24px] border border-rose-100 bg-rose-50/40 p-5">
+          <h3 className="text-sm font-semibold text-rose-900">
+            {t.deleteProjectLabel}
+          </h3>
+          <p className="mt-1 text-sm text-rose-700/80">{t.deleteConfirm}</p>
+          {confirming ? (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={onDelete}
+                className="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-700"
+              >
+                {t.projectMenuDelete}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="secondary-button"
+              >
+                {t.cancelLabel}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="mt-3 inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+            >
+              <Trash2 size={16} />
+              {t.deleteProjectLabel}
+            </button>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
