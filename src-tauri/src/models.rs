@@ -6,6 +6,23 @@ pub struct AppPayload {
     pub settings: AppSettings,
     pub projects: Vec<ProjectSummary>,
     pub selected_project: Option<ProjectRecord>,
+    #[serde(default)]
+    pub categories: Vec<Category>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Category {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub order: usize,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -28,6 +45,10 @@ pub struct ProjectSummary {
     #[serde(default)]
     pub client: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -45,6 +66,10 @@ pub struct ProjectRecord {
     pub selected_stage_ids: Vec<String>,
     #[serde(default)]
     pub stages: Vec<ProjectStageRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -160,6 +185,8 @@ impl ProjectRecord {
             name: self.name.clone(),
             client: self.client.clone(),
             updated_at: self.updated_at.clone(),
+            category_id: self.category_id.clone(),
+            color: self.color.clone(),
         }
     }
 }

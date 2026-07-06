@@ -403,6 +403,92 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// ── Категории ───────────────────────────────────────────────────────────────
+
+pub fn list_categories(conn: &Connection) -> Result<Vec<Category>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, color, icon, ord, created_at, updated_at FROM category ORDER BY ord")
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<Category> = stmt
+        .query_map([], |r| {
+            Ok(Category {
+                id: r.get::<_, String>(0)?,
+                name: r.get::<_, String>(1)?,
+                color: r.get::<_, String>(2)?,
+                icon: r.get::<_, String>(3)?,
+                order: r.get::<_, i64>(4)? as usize,
+                created_at: r.get::<_, String>(5)?,
+                updated_at: r.get::<_, String>(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+pub fn next_category_order(conn: &Connection) -> Result<usize, String> {
+    let max: i64 = conn
+        .query_row("SELECT COALESCE(MAX(ord), -1) FROM category", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok((max + 1) as usize)
+}
+
+pub fn insert_category(conn: &Connection, category: &Category) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO category(id, name, color, icon, ord, created_at, updated_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            category.id,
+            category.name,
+            category.color,
+            category.icon,
+            category.order as i64,
+            category.created_at,
+            category.updated_at,
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+pub fn update_category(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    color: &str,
+    icon: &str,
+    updated_at: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE category SET name = ?2, color = ?3, icon = ?4, updated_at = ?5 WHERE id = ?1",
+        params![id, name, color, icon, updated_at],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+pub fn delete_category(conn: &Connection, id: &str) -> Result<(), String> {
+    // Проекты этой категории обнулятся автоматически (ON DELETE SET NULL).
+    conn.execute("DELETE FROM category WHERE id = ?1", params![id])
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+pub fn set_project_category(
+    conn: &Connection,
+    project_id: &str,
+    category_id: Option<&str>,
+    updated_at: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE project SET category_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![project_id, category_id, updated_at],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 /// Сохранить проект: строка проекта обновляется (категория и цвет
 /// сохраняются), дочерние сущности перезаписываются целиком.
 pub fn save_project(conn: &mut Connection, project: &ProjectRecord) -> Result<(), String> {
@@ -462,7 +548,8 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<ProjectRecord>, String> {
 pub fn load_project(conn: &Connection, id: &str) -> Result<Option<ProjectRecord>, String> {
     let base = conn
         .query_row(
-            "SELECT name, client, note, created_at, updated_at FROM project WHERE id = ?1",
+            "SELECT name, client, note, created_at, updated_at, category_id, color
+             FROM project WHERE id = ?1",
             params![id],
             |r| {
                 Ok((
@@ -471,13 +558,15 @@ pub fn load_project(conn: &Connection, id: &str) -> Result<Option<ProjectRecord>
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    r.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((name, client, note, created_at, updated_at)) = base else {
+    let Some((name, client, note, created_at, updated_at, category_id, color)) = base else {
         return Ok(None);
     };
 
@@ -492,6 +581,8 @@ pub fn load_project(conn: &Connection, id: &str) -> Result<Option<ProjectRecord>
         apps: load_apps(conn, id)?,
         selected_stage_ids: load_selected_stage_ids(conn, id)?,
         stages: load_stages(conn, id)?,
+        category_id,
+        color,
     };
     crate::storage::normalize_project_structure(&mut project);
     Ok(Some(project))
@@ -925,5 +1016,39 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn categories_crud_and_assignment() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO project(id, name, client, note, created_at, updated_at)
+             VALUES('p1', 'Проект', '', '', 't', 't')",
+            [],
+        )
+        .unwrap();
+
+        let cat = Category {
+            id: "c1".into(),
+            name: "Монтаж".into(),
+            color: "#059669".into(),
+            icon: "🎬".into(),
+            order: next_category_order(&conn).unwrap(),
+            created_at: "t".into(),
+            updated_at: "t".into(),
+        };
+        insert_category(&conn, &cat).unwrap();
+        assert_eq!(list_categories(&conn).unwrap().len(), 1);
+
+        set_project_category(&conn, "p1", Some("c1"), "t2").unwrap();
+        let p = load_project(&conn, "p1").unwrap().unwrap();
+        assert_eq!(p.category_id.as_deref(), Some("c1"), "категория привязана");
+
+        // Удаление категории обнуляет её у проектов (ON DELETE SET NULL).
+        delete_category(&conn, "c1").unwrap();
+        assert_eq!(list_categories(&conn).unwrap().len(), 0);
+        let p2 = load_project(&conn, "p1").unwrap().unwrap();
+        assert_eq!(p2.category_id, None, "категория обнулена после удаления");
     }
 }

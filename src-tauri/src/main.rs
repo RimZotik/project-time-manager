@@ -67,7 +67,63 @@ fn get_app_state(state: State<'_, AppRuntime>) -> Result<AppPayload, String> {
         },
         projects: store.projects.iter().map(ProjectRecord::summary).collect(),
         selected_project,
+        categories: store.categories.clone(),
     })
+}
+
+#[tauri::command]
+fn list_categories(state: State<'_, AppRuntime>) -> Result<Vec<Category>, String> {
+    let store = state.store.lock().map_err(|err| err.to_string())?;
+    Ok(store.categories.clone())
+}
+
+#[tauri::command]
+fn create_category(
+    state: State<'_, AppRuntime>,
+    name: String,
+    color: String,
+    icon: String,
+) -> Result<Category, String> {
+    let category = storage::create_category(&state.paths, &name, &color, &icon)?;
+    let mut store = state.store.lock().map_err(|err| err.to_string())?;
+    store.categories = storage::list_categories(&state.paths)?;
+    Ok(category)
+}
+
+#[tauri::command]
+fn update_category(
+    state: State<'_, AppRuntime>,
+    id: String,
+    name: String,
+    color: String,
+    icon: String,
+) -> Result<(), String> {
+    storage::update_category(&state.paths, &id, &name, &color, &icon)?;
+    let mut store = state.store.lock().map_err(|err| err.to_string())?;
+    store.categories = storage::list_categories(&state.paths)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_category(state: State<'_, AppRuntime>, id: String) -> Result<(), String> {
+    storage::delete_category(&state.paths, &id)?;
+    let mut store = state.store.lock().map_err(|err| err.to_string())?;
+    store.categories = storage::list_categories(&state.paths)?;
+    // У проектов этой категории category_id обнулился — перечитываем проекты.
+    store.projects = storage::list_project_files(&state.paths)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_project_category(
+    state: State<'_, AppRuntime>,
+    project_id: String,
+    category_id: Option<String>,
+) -> Result<ProjectRecord, String> {
+    let updated =
+        storage::set_project_category(&state.paths, &project_id, category_id.as_deref())?;
+    sync_project_in_store(&state, updated.clone())?;
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -708,6 +764,11 @@ fn main() {
             toggle_stage_tab_included,
             toggle_stage_url_included,
             update_app_settings,
+            list_categories,
+            create_category,
+            update_category,
+            delete_category,
+            set_project_category,
             import_project_json,
             export_selected_project_xlsx,
             export_selected_project_pdf,

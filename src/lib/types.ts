@@ -17,11 +17,23 @@ export type AppSettings = {
   language: Language;
 };
 
+export type Category = {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProjectSummary = {
   id: string;
   name: string;
   client: string;
   updated_at: string;
+  category_id?: string | null;
+  color?: string | null;
 };
 
 export type VisitedUrlRecord = {
@@ -86,6 +98,8 @@ export type ProjectRecord = ProjectSummary & {
   apps: AppUsageRecord[];
   selected_stage_ids: string[];
   stages: ProjectStageRecord[];
+  category_id?: string | null;
+  color?: string | null;
 };
 
 export type AppState = {
@@ -93,6 +107,7 @@ export type AppState = {
   settings: AppSettings;
   projects: ProjectSummary[];
   selected_project: ProjectRecord | null;
+  categories: Category[];
 };
 
 export const fallbackState: AppState = {
@@ -107,4 +122,5 @@ export const fallbackState: AppState = {
   },
   projects: [],
   selected_project: null,
+  categories: [],
 };

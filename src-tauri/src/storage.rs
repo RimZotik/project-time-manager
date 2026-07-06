@@ -46,6 +46,7 @@ impl Default for WorkspaceIndex {
 pub struct StoreData {
     pub workspace: WorkspaceIndex,
     pub projects: Vec<ProjectRecord>,
+    pub categories: Vec<Category>,
 }
 
 pub fn storage_paths() -> Result<StoragePaths, String> {
@@ -171,7 +172,70 @@ pub fn load_store(paths: &StoragePaths) -> Result<StoreData, String> {
     Ok(StoreData {
         workspace: load_workspace(paths)?,
         projects: list_project_files(paths)?,
+        categories: list_categories(paths)?,
     })
+}
+
+// ── Категории (обёртки над db) ──────────────────────────────────────────────
+
+pub fn list_categories(paths: &StoragePaths) -> Result<Vec<Category>, String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::list_categories(&conn)
+}
+
+pub fn create_category(
+    paths: &StoragePaths,
+    name: &str,
+    color: &str,
+    icon: &str,
+) -> Result<Category, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Название категории не может быть пустым.".to_string());
+    }
+    let conn = crate::db::connect(&paths.db_file)?;
+    let category = Category {
+        id: Uuid::new_v4().to_string(),
+        name: trimmed.to_string(),
+        color: color.to_string(),
+        icon: icon.to_string(),
+        order: crate::db::next_category_order(&conn)?,
+        created_at: now_iso(),
+        updated_at: now_iso(),
+    };
+    crate::db::insert_category(&conn, &category)?;
+    Ok(category)
+}
+
+pub fn update_category(
+    paths: &StoragePaths,
+    id: &str,
+    name: &str,
+    color: &str,
+    icon: &str,
+) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Название категории не может быть пустым.".to_string());
+    }
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::update_category(&conn, id, trimmed, color, icon, &now_iso())
+}
+
+pub fn delete_category(paths: &StoragePaths, id: &str) -> Result<(), String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::delete_category(&conn, id)
+}
+
+pub fn set_project_category(
+    paths: &StoragePaths,
+    project_id: &str,
+    category_id: Option<&str>,
+) -> Result<ProjectRecord, String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::set_project_category(&conn, project_id, category_id, &now_iso())?;
+    drop(conn);
+    load_project(paths, project_id)
 }
 
 pub fn project_path(paths: &StoragePaths, project: &ProjectRecord) -> PathBuf {
@@ -285,6 +349,8 @@ pub fn create_project(
         apps: Vec::new(),
         selected_stage_ids: Vec::new(),
         stages: Vec::new(),
+        category_id: None,
+        color: None,
     };
     normalize_project_structure(&mut project);
     save_project(paths, &project)?;
