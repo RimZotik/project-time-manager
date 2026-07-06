@@ -11,6 +11,37 @@ pub struct AppPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnalyticsPayload {
+    pub projects: Vec<ProjectAnalytics>,
+    pub sessions: Vec<SessionLite>,
+    pub top_apps: Vec<AppTotal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectAnalytics {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    pub total_seconds: u64,
+    pub session_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionLite {
+    pub project_id: String,
+    pub started_at: String,
+    pub duration_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppTotal {
+    pub name: String,
+    pub kind: String,
+    pub seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Category {
     pub id: String,
     pub name: String,

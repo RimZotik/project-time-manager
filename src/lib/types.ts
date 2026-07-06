@@ -110,6 +110,28 @@ export type AppState = {
   categories: Category[];
 };
 
+export type ProjectAnalytics = {
+  id: string;
+  name: string;
+  category_id?: string | null;
+  total_seconds: number;
+  session_count: number;
+};
+
+export type SessionLite = {
+  project_id: string;
+  started_at: string;
+  duration_seconds: number;
+};
+
+export type AppTotal = { name: string; kind: string; seconds: number };
+
+export type AnalyticsPayload = {
+  projects: ProjectAnalytics[];
+  sessions: SessionLite[];
+  top_apps: AppTotal[];
+};
+
 export const fallbackState: AppState = {
   tracker: {
     status: "stopped",

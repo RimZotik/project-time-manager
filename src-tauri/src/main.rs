@@ -74,6 +74,12 @@ fn list_categories(state: State<'_, AppRuntime>) -> Result<Vec<Category>, String
 }
 
 #[tauri::command]
+fn get_analytics(state: State<'_, AppRuntime>) -> Result<AnalyticsPayload, String> {
+    let conn = crate::db::connect(&state.paths.db_file)?;
+    crate::db::analytics(&conn)
+}
+
+#[tauri::command]
 fn create_category(
     state: State<'_, AppRuntime>,
     name: String,
@@ -722,6 +728,7 @@ fn main() {
             toggle_stage_url_included,
             update_app_settings,
             list_categories,
+            get_analytics,
             create_category,
             update_category,
             delete_category,

@@ -394,6 +394,103 @@ fn insert_children(
     Ok(())
 }
 
+// ── Аналитика ─────────────────────────────────────────────────────────────
+
+/// Агрегированные данные по всем проектам для страницы аналитики.
+pub fn analytics(conn: &Connection) -> Result<AnalyticsPayload, String> {
+    // Базовый список проектов (без вычисляемых полей).
+    let base: Vec<(String, String, Option<String>)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, name, category_id FROM project")
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String, Option<String>)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let mut projects = Vec::with_capacity(base.len());
+    for (id, name, category_id) in base {
+        let total_seconds: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(time_seconds),0) FROM app_usage WHERE project_id=?1 AND enabled=1",
+                params![id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let session_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session WHERE project_id=?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        projects.push(ProjectAnalytics {
+            id,
+            name,
+            category_id,
+            total_seconds: total_seconds as u64,
+            session_count: session_count as u64,
+        });
+    }
+
+    // Все сессии (облегчённое представление).
+    let sessions: Vec<SessionLite> = {
+        let mut stmt = conn
+            .prepare("SELECT project_id, started_at, duration_seconds FROM session")
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<SessionLite> = stmt
+            .query_map([], |r| {
+                Ok(SessionLite {
+                    project_id: r.get::<_, String>(0)?,
+                    started_at: r.get::<_, String>(1)?,
+                    duration_seconds: r.get::<_, i64>(2)? as u64,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    // Топ приложений по суммарному времени.
+    let top_apps: Vec<AppTotal> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, kind, COALESCE(SUM(time_seconds),0) AS s
+                 FROM app_usage WHERE enabled=1
+                 GROUP BY name, kind ORDER BY s DESC LIMIT 20",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<AppTotal> = stmt
+            .query_map([], |r| {
+                Ok(AppTotal {
+                    name: r.get::<_, String>(0)?,
+                    kind: r.get::<_, String>(1)?,
+                    seconds: r.get::<_, i64>(2)? as u64,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    Ok(AnalyticsPayload {
+        projects,
+        sessions,
+        top_apps,
+    })
+}
+
 // ── Runtime: чтение/запись проекта поверх SQLite ────────────────────────────
 
 /// Удалить проект целиком (дочерние строки уходят по ON DELETE CASCADE).
