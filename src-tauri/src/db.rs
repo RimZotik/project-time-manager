@@ -5,7 +5,7 @@
 // данные (сессии, приложения, вкладки, ссылки, этапы) переносятся 1:1.
 use crate::models::*;
 use crate::storage::{self, StoragePaths};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -153,18 +153,18 @@ pub struct MigrationReport {
     pub total_duration_seconds: u64,
 }
 
-/// Открыть базу по пути и подготовить схему.
-pub fn open(path: &std::path::Path) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    init_schema(&conn)?;
-    Ok(conn)
-}
-
 pub fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(SCHEMA).map_err(|e| e.to_string())
 }
 
-fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+/// Открыть базу и гарантировать схему + прагмы (foreign_keys, WAL).
+pub fn connect(db_path: &std::path::Path) -> Result<Connection, String> {
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO setting(key, value) VALUES(?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -172,6 +172,20 @@ fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> 
     )
     .map(|_| ())
     .map_err(|e| e.to_string())
+}
+
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT value FROM setting WHERE key = ?1", params![key], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn clear_setting(conn: &Connection, key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM setting WHERE key = ?1", params![key])
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Была ли база уже заполнена (есть ли проекты).
@@ -187,8 +201,10 @@ pub fn migrate_from_json(
     conn: &mut Connection,
     paths: &StoragePaths,
 ) -> Result<MigrationReport, String> {
-    let workspace = storage::load_workspace(paths)?;
-    let projects = storage::list_project_files(paths)?;
+    // Читаем именно legacy-JSON (а не SQLite-обёртки storage), иначе миграция
+    // читала бы из пустой базы саму себя.
+    let workspace = storage::load_workspace_json(paths)?;
+    let projects = storage::list_project_files_json(paths)?;
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -228,7 +244,16 @@ fn insert_project(
         ],
     )
     .map_err(|e| e.to_string())?;
+    insert_children(conn, project, report)
+}
 
+/// Вставить дочерние сущности проекта (этапы, сессии, приложения…).
+/// Строка самого проекта должна уже существовать.
+fn insert_children(
+    conn: &Connection,
+    project: &ProjectRecord,
+    report: &mut MigrationReport,
+) -> Result<(), String> {
     // Этапы
     for stage in &project.stages {
         conn.execute(
@@ -369,6 +394,366 @@ fn insert_project(
     Ok(())
 }
 
+// ── Runtime: чтение/запись проекта поверх SQLite ────────────────────────────
+
+/// Удалить проект целиком (дочерние строки уходят по ON DELETE CASCADE).
+pub fn delete_project(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM project WHERE id = ?1", params![id])
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Сохранить проект: строка проекта обновляется (категория и цвет
+/// сохраняются), дочерние сущности перезаписываются целиком.
+pub fn save_project(conn: &mut Connection, project: &ProjectRecord) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO project(id, name, client, note, created_at, updated_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           client = excluded.client,
+           note = excluded.note,
+           updated_at = excluded.updated_at",
+        params![
+            project.id,
+            project.name,
+            project.client,
+            project.note,
+            project.created_at,
+            project.updated_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for table in ["stage", "session", "app_usage", "project_selected_stage"] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE project_id = ?1"),
+            params![project.id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let mut discard = MigrationReport::default();
+    insert_children(&tx, project, &mut discard)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn list_projects(conn: &Connection) -> Result<Vec<ProjectRecord>, String> {
+    let ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT id FROM project ORDER BY updated_at DESC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
+    };
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(project) = load_project(conn, &id)? {
+            out.push(project);
+        }
+    }
+    Ok(out)
+}
+
+pub fn load_project(conn: &Connection, id: &str) -> Result<Option<ProjectRecord>, String> {
+    let base = conn
+        .query_row(
+            "SELECT name, client, note, created_at, updated_at FROM project WHERE id = ?1",
+            params![id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some((name, client, note, created_at, updated_at)) = base else {
+        return Ok(None);
+    };
+
+    let mut project = ProjectRecord {
+        id: id.to_string(),
+        name,
+        client,
+        note,
+        created_at,
+        updated_at,
+        sessions: load_sessions(conn, id)?,
+        apps: load_apps(conn, id)?,
+        selected_stage_ids: load_selected_stage_ids(conn, id)?,
+        stages: load_stages(conn, id)?,
+    };
+    crate::storage::normalize_project_structure(&mut project);
+    Ok(Some(project))
+}
+
+fn load_selected_stage_ids(conn: &Connection, project_id: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT stage_id FROM project_selected_stage WHERE project_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![project_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+fn load_sessions(conn: &Connection, project_id: &str) -> Result<Vec<SessionRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, started_at, stopped_at, duration_seconds, app_count, browser_count
+             FROM session WHERE project_id = ?1 ORDER BY started_at",
+        )
+        .map_err(|e| e.to_string())?;
+    let raw: Vec<SessionRecord> = stmt
+        .query_map(params![project_id], |r| {
+            Ok(SessionRecord {
+                id: r.get::<_, String>(0)?,
+                started_at: r.get::<_, String>(1)?,
+                stopped_at: r.get::<_, Option<String>>(2)?,
+                duration_seconds: r.get::<_, i64>(3)? as u64,
+                app_count: r.get::<_, i64>(4)? as usize,
+                browser_count: r.get::<_, i64>(5)? as usize,
+                stages: Vec::new(),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut sessions = Vec::with_capacity(raw.len());
+    for mut session in raw {
+        let mut stmt = conn
+            .prepare("SELECT stage_id, name FROM session_stage WHERE session_id = ?1")
+            .map_err(|e| e.to_string())?;
+        session.stages = stmt
+            .query_map(params![session.id], |r| {
+                Ok(SessionStageSnapshot {
+                    id: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                    name: r.get::<_, String>(1)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        sessions.push(session);
+    }
+    Ok(sessions)
+}
+
+fn load_apps(conn: &Connection, project_id: &str) -> Result<Vec<AppUsageRecord>, String> {
+    let raw: Vec<(i64, AppUsageRecord)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, key, name, process_name, process_path, icon_data_url, kind, enabled, time_seconds
+                 FROM app_usage WHERE project_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(i64, AppUsageRecord)> = stmt
+            .query_map(params![project_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    AppUsageRecord {
+                        key: r.get::<_, String>(1)?,
+                        name: r.get::<_, String>(2)?,
+                        process_name: r.get::<_, String>(3)?,
+                        process_path: r.get::<_, String>(4)?,
+                        icon_data_url: r.get::<_, Option<String>>(5)?,
+                        kind: r.get::<_, String>(6)?,
+                        enabled: r.get::<_, i64>(7)? != 0,
+                        time_seconds: r.get::<_, i64>(8)? as u64,
+                        tabs: Vec::new(),
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let mut apps = Vec::with_capacity(raw.len());
+    for (app_id, mut app) in raw {
+        app.tabs = load_tabs(conn, app_id)?;
+        apps.push(app);
+    }
+    Ok(apps)
+}
+
+fn load_tabs(conn: &Connection, app_id: i64) -> Result<Vec<TabUsageRecord>, String> {
+    let raw: Vec<(i64, TabUsageRecord)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, key, title, url, favicon_url, enabled, time_seconds
+                 FROM tab_usage WHERE app_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(i64, TabUsageRecord)> = stmt
+            .query_map(params![app_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    TabUsageRecord {
+                        key: r.get::<_, String>(1)?,
+                        title: r.get::<_, String>(2)?,
+                        url: r.get::<_, Option<String>>(3)?,
+                        urls: Vec::new(),
+                        favicon_url: r.get::<_, Option<String>>(4)?,
+                        enabled: r.get::<_, i64>(5)? != 0,
+                        time_seconds: r.get::<_, i64>(6)? as u64,
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let mut tabs = Vec::with_capacity(raw.len());
+    for (tab_id, mut tab) in raw {
+        let mut stmt = conn
+            .prepare(
+                "SELECT url, title, last_seen_at, hits, enabled, time_seconds
+                 FROM visited_url WHERE tab_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        tab.urls = stmt
+            .query_map(params![tab_id], |r| {
+                Ok(VisitedUrlRecord {
+                    url: r.get::<_, String>(0)?,
+                    title: r.get::<_, String>(1)?,
+                    last_seen_at: r.get::<_, String>(2)?,
+                    hits: r.get::<_, i64>(3)? as u64,
+                    enabled: r.get::<_, i64>(4)? != 0,
+                    time_seconds: r.get::<_, i64>(5)? as u64,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        tabs.push(tab);
+    }
+    Ok(tabs)
+}
+
+fn load_stages(conn: &Connection, project_id: &str) -> Result<Vec<ProjectStageRecord>, String> {
+    let raw: Vec<ProjectStageRecord> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, ord, created_at, updated_at
+                 FROM stage WHERE project_id = ?1 ORDER BY ord",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<ProjectStageRecord> = stmt
+            .query_map(params![project_id], |r| {
+                Ok(ProjectStageRecord {
+                    id: r.get::<_, String>(0)?,
+                    name: r.get::<_, String>(1)?,
+                    order: r.get::<_, i64>(2)? as usize,
+                    created_at: r.get::<_, String>(3)?,
+                    updated_at: r.get::<_, String>(4)?,
+                    apps: Vec::new(),
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let mut stages = Vec::with_capacity(raw.len());
+    for mut stage in raw {
+        stage.apps = load_stage_apps(conn, &stage.id)?;
+        stages.push(stage);
+    }
+    Ok(stages)
+}
+
+fn load_stage_apps(conn: &Connection, stage_id: &str) -> Result<Vec<StageAppRecord>, String> {
+    let mut apps: Vec<StageAppRecord> = {
+        let mut stmt = conn
+            .prepare("SELECT app_key, enabled FROM stage_app WHERE stage_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<StageAppRecord> = stmt
+            .query_map(params![stage_id], |r| {
+                Ok(StageAppRecord {
+                    app_key: r.get::<_, String>(0)?,
+                    enabled: r.get::<_, i64>(1)? != 0,
+                    tabs: Vec::new(),
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    // Вкладки этапа
+    {
+        let mut stmt = conn
+            .prepare("SELECT app_key, tab_key, enabled FROM stage_tab WHERE stage_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let tabs: Vec<(String, StageTabRecord)> = stmt
+            .query_map(params![stage_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    StageTabRecord {
+                        tab_key: r.get::<_, String>(1)?,
+                        enabled: r.get::<_, i64>(2)? != 0,
+                        urls: Vec::new(),
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        for (app_key, tab) in tabs {
+            if let Some(app) = apps.iter_mut().find(|a| a.app_key == app_key) {
+                app.tabs.push(tab);
+            }
+        }
+    }
+
+    // Ссылки этапа
+    {
+        let mut stmt = conn
+            .prepare("SELECT app_key, tab_key, url, enabled FROM stage_url WHERE stage_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let urls: Vec<(String, String, StageUrlRecord)> = stmt
+            .query_map(params![stage_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    StageUrlRecord {
+                        url: r.get::<_, String>(2)?,
+                        enabled: r.get::<_, i64>(3)? != 0,
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        for (app_key, tab_key, url) in urls {
+            if let Some(app) = apps.iter_mut().find(|a| a.app_key == app_key) {
+                if let Some(tab) = app.tabs.iter_mut().find(|t| t.tab_key == tab_key) {
+                    tab.urls.push(url);
+                }
+            }
+        }
+    }
+
+    Ok(apps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +791,7 @@ mod tests {
         let paths = StoragePaths {
             projects_dir: tmp.join("Проекты"),
             workspace_file: tmp.join("workspace.json"),
+            db_file: tmp.join("ptm.db"),
         };
 
         let mut conn = Connection::open_in_memory().unwrap();
@@ -443,6 +829,100 @@ mod tests {
             )
             .unwrap();
         assert!(top.contains("Premiere"), "топ-приложение = {top}");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // Полный рантайм-путь запуска приложения на файловой базе:
+    // ensure_storage → migrate_legacy_if_needed → load_store.
+    #[test]
+    fn startup_path_migrates_and_loads() {
+        let real = PathBuf::from("/Users/rimzotik/Downloads/Project Time Manager-datas/data");
+        if !real.exists() {
+            eprintln!("SKIP: реальные данные не найдены");
+            return;
+        }
+        let tmp = std::env::temp_dir().join(format!("ptm_startup_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        copy_dir_all(&real, &tmp);
+        let paths = StoragePaths {
+            projects_dir: tmp.join("Проекты"),
+            workspace_file: tmp.join("workspace.json"),
+            db_file: tmp.join("ptm.db"),
+        };
+
+        // Как в main(): создаём базу, мигрируем legacy, читаем store.
+        storage::ensure_storage(&paths).unwrap();
+        storage::migrate_legacy_if_needed(&paths).unwrap();
+        let store = storage::load_store(&paths).unwrap();
+
+        assert_eq!(store.projects.len(), 1, "проектов в store");
+        let project = &store.projects[0];
+        assert_eq!(project.sessions.len(), 14);
+        assert_eq!(project.apps.len(), 41);
+        assert_eq!(project.stages.len(), 9);
+        assert_eq!(store.workspace.language, "ru");
+
+        // Повторный вызов не должен дублировать данные (idempotent).
+        storage::migrate_legacy_if_needed(&paths).unwrap();
+        let store2 = storage::load_store(&paths).unwrap();
+        assert_eq!(store2.projects.len(), 1, "миграция не идемпотентна");
+        assert_eq!(store2.projects[0].apps.len(), 41);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn roundtrip_load_save_load() {
+        let real = PathBuf::from("/Users/rimzotik/Downloads/Project Time Manager-datas/data");
+        if !real.exists() {
+            eprintln!("SKIP: реальные данные не найдены");
+            return;
+        }
+        let tmp = std::env::temp_dir().join(format!("ptm_roundtrip_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        copy_dir_all(&real, &tmp);
+        let paths = StoragePaths {
+            projects_dir: tmp.join("Проекты"),
+            workspace_file: tmp.join("workspace.json"),
+            db_file: tmp.join("ptm.db"),
+        };
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        migrate_from_json(&mut conn, &paths).unwrap();
+
+        // Реконструкция проекта из базы
+        let projects = list_projects(&conn).unwrap();
+        assert_eq!(projects.len(), 1);
+        let project = projects.into_iter().next().unwrap();
+        let count_urls = |p: &ProjectRecord| -> usize {
+            p.apps.iter().flat_map(|a| a.tabs.iter()).map(|t| t.urls.len()).sum()
+        };
+        let sessions0 = project.sessions.len();
+        let apps0 = project.apps.len();
+        let tabs0: usize = project.apps.iter().map(|a| a.tabs.len()).sum();
+        let urls0 = count_urls(&project);
+        let dur0: u64 = project.sessions.iter().map(|s| s.duration_seconds).sum();
+        let stages0 = project.stages.len();
+        assert_eq!(sessions0, 14);
+        assert_eq!(apps0, 41);
+        assert_eq!(dur0, 229_946);
+
+        // Пересохранение (delete+insert) не должно терять данные
+        let id = project.id.clone();
+        save_project(&mut conn, &project).unwrap();
+        let reloaded = load_project(&conn, &id).unwrap().unwrap();
+        assert_eq!(reloaded.sessions.len(), sessions0, "сессии после re-save");
+        assert_eq!(reloaded.apps.len(), apps0, "приложения после re-save");
+        assert_eq!(reloaded.apps.iter().map(|a| a.tabs.len()).sum::<usize>(), tabs0, "вкладки");
+        assert_eq!(count_urls(&reloaded), urls0, "ссылки");
+        assert_eq!(reloaded.stages.len(), stages0, "этапы");
+        assert_eq!(
+            reloaded.sessions.iter().map(|s| s.duration_seconds).sum::<u64>(),
+            dur0,
+            "суммарное время"
+        );
 
         let _ = fs::remove_dir_all(&tmp);
     }

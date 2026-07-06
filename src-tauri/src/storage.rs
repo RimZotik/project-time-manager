@@ -1,3 +1,7 @@
+// TODO(phase3): почистить legacy-хелперы JSON и экспорт; пока часть функций
+// остаётся ради миграции и отчётов — глушим предупреждения переходного периода.
+#![allow(dead_code)]
+
 use crate::models::*;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -12,6 +16,7 @@ use uuid::Uuid;
 pub struct StoragePaths {
     pub projects_dir: PathBuf,
     pub workspace_file: PathBuf,
+    pub db_file: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,17 +56,38 @@ pub fn storage_paths() -> Result<StoragePaths, String> {
         .unwrap_or_else(|| PathBuf::from("data"));
     let projects_dir = root.join("Проекты");
     let workspace_file = root.join("workspace.json");
+    let db_file = root.join("ptm.db");
     Ok(StoragePaths {
         projects_dir,
         workspace_file,
+        db_file,
     })
 }
 
+/// Гарантирует наличие базы и схемы. Вызывается перед любой записью.
 pub fn ensure_storage(paths: &StoragePaths) -> Result<(), String> {
-    fs::create_dir_all(&paths.projects_dir).map_err(|err| err.to_string())?;
-    migrate_legacy_storage(paths)?;
-    migrate_flat_project_files(paths)?;
-    migrate_legacy_exports(paths)?;
+    if let Some(parent) = paths.db_file.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    crate::db::connect(&paths.db_file).map(|_| ())
+}
+
+/// При первом запуске: если база пуста, но рядом лежат старые JSON-данные —
+/// переносим их в SQLite. Вызывается один раз из main().
+pub fn migrate_legacy_if_needed(paths: &StoragePaths) -> Result<(), String> {
+    let mut conn = crate::db::connect(&paths.db_file)?;
+    if crate::db::is_populated(&conn)? {
+        return Ok(());
+    }
+    let has_projects = paths.projects_dir.exists()
+        && fs::read_dir(&paths.projects_dir)
+            .map(|mut dir| dir.next().is_some())
+            .unwrap_or(false);
+    if !has_projects && !paths.workspace_file.exists() {
+        return Ok(());
+    }
+    let report = crate::db::migrate_from_json(&mut conn, paths)?;
+    eprintln!("Миграция из JSON выполнена: {report:?}");
     Ok(())
 }
 
@@ -69,7 +95,8 @@ pub fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
-pub fn load_workspace(paths: &StoragePaths) -> Result<WorkspaceIndex, String> {
+/// Legacy: чтение старого workspace.json (используется только миграцией).
+pub fn load_workspace_json(paths: &StoragePaths) -> Result<WorkspaceIndex, String> {
     if !paths.workspace_file.exists() {
         return Ok(WorkspaceIndex::default());
     }
@@ -78,14 +105,40 @@ pub fn load_workspace(paths: &StoragePaths) -> Result<WorkspaceIndex, String> {
     serde_json::from_str(&content).map_err(|err| err.to_string())
 }
 
+pub fn load_workspace(paths: &StoragePaths) -> Result<WorkspaceIndex, String> {
+    let conn = crate::db::connect(&paths.db_file)?;
+    Ok(WorkspaceIndex {
+        selected_project_id: crate::db::get_setting(&conn, "selected_project_id")?,
+        autostart: crate::db::get_setting(&conn, "autostart")?.as_deref() == Some("1"),
+        language: crate::db::get_setting(&conn, "language")?.unwrap_or_else(default_language),
+    })
+}
+
 pub fn save_workspace(paths: &StoragePaths, workspace: &WorkspaceIndex) -> Result<(), String> {
-    ensure_storage(paths)?;
-    let content = serde_json::to_string_pretty(workspace).map_err(|err| err.to_string())?;
-    write_text_file(&paths.workspace_file, &content)
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::set_setting(&conn, "language", &workspace.language)?;
+    crate::db::set_setting(
+        &conn,
+        "autostart",
+        if workspace.autostart { "1" } else { "0" },
+    )?;
+    match &workspace.selected_project_id {
+        Some(id) => crate::db::set_setting(&conn, "selected_project_id", id)?,
+        None => crate::db::clear_setting(&conn, "selected_project_id")?,
+    }
+    Ok(())
 }
 
 pub fn list_project_files(paths: &StoragePaths) -> Result<Vec<ProjectRecord>, String> {
-    ensure_storage(paths)?;
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::list_projects(&conn)
+}
+
+/// Legacy: чтение старых project.json (используется только миграцией).
+pub fn list_project_files_json(paths: &StoragePaths) -> Result<Vec<ProjectRecord>, String> {
+    if !paths.projects_dir.exists() {
+        return Ok(Vec::new());
+    }
     let mut projects = Vec::new();
 
     for entry in fs::read_dir(&paths.projects_dir).map_err(|err| err.to_string())? {
@@ -186,16 +239,8 @@ pub fn project_path_by_id(paths: &StoragePaths, project_id: &str) -> Result<Path
 
 pub fn save_project(paths: &StoragePaths, project: &ProjectRecord) -> Result<(), String> {
     ensure_storage(paths)?;
-    let content = serde_json::to_string_pretty(project).map_err(|err| err.to_string())?;
-    let path = project_path(paths, project);
-    write_text_file(&path, &content)?;
-
-    let legacy_path = paths.projects_dir.join(format!("{}.json", project.id));
-    if legacy_path != path && legacy_path.exists() {
-        let _ = fs::remove_file(legacy_path);
-    }
-
-    Ok(())
+    let mut conn = crate::db::connect(&paths.db_file)?;
+    crate::db::save_project(&mut conn, project)
 }
 
 pub fn rename_project_record(
@@ -208,75 +253,20 @@ pub fn rename_project_record(
     if trimmed.is_empty() {
         return Err("Название проекта не может быть пустым.".to_string());
     }
-
-    let old_dir = project_dir(paths, &project);
-    let old_stem = project_file_stem(&project);
-    let new_name = sanitize_file_name(trimmed);
-
-    if new_name.is_empty() {
-        return Err("Название проекта не может быть пустым.".to_string());
-    }
-
-    if project.name == new_name {
-        project.updated_at = now_iso();
-        save_project(paths, &project)?;
-        return Ok(project);
-    }
-
-    let new_dir = paths.projects_dir.join(&new_name);
-    if new_dir.exists() && new_dir != old_dir {
-        return Err("Проект с таким названием уже существует.".to_string());
-    }
-
-    if old_dir.exists() && old_dir != new_dir {
-        fs::rename(&old_dir, &new_dir).map_err(|err| err.to_string())?;
-    } else {
-        fs::create_dir_all(&new_dir).map_err(|err| err.to_string())?;
-    }
-
-    let report_dir = if old_dir != new_dir {
-        &new_dir
-    } else {
-        &old_dir
-    };
-    let old_xlsx = report_dir.join(format!("{old_stem}.xlsx"));
-    let new_xlsx = new_dir.join(format!("{new_name}.xlsx"));
-    if old_xlsx.exists() && old_xlsx != new_xlsx {
-        let _ = fs::rename(&old_xlsx, &new_xlsx);
-    }
-
-    let old_pdf = report_dir.join(format!("{old_stem}.pdf"));
-    let new_pdf = new_dir.join(format!("{new_name}.pdf"));
-    if old_pdf.exists() && old_pdf != new_pdf {
-        let _ = fs::rename(&old_pdf, &new_pdf);
-    }
-
-    project.name = new_name;
+    project.name = trimmed.to_string();
     project.updated_at = now_iso();
     save_project(paths, &project)?;
     Ok(project)
 }
 
 pub fn delete_project_record(paths: &StoragePaths, project_id: &str) -> Result<(), String> {
-    let project = load_project(paths, project_id)?;
-    let dir = project_dir(paths, &project);
-    if dir.exists() {
-        fs::remove_dir_all(&dir).map_err(|err| err.to_string())?;
-    } else {
-        let path = project_path(paths, &project);
-        if path.exists() {
-            fs::remove_file(path).map_err(|err| err.to_string())?;
-        }
-    }
-    Ok(())
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::delete_project(&conn, project_id)
 }
 
 pub fn load_project(paths: &StoragePaths, project_id: &str) -> Result<ProjectRecord, String> {
-    let path = project_path_by_id(paths, project_id)?;
-    let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
-    let mut project: ProjectRecord = serde_json::from_str(&content).map_err(|err| err.to_string())?;
-    normalize_project_structure(&mut project);
-    Ok(project)
+    let conn = crate::db::connect(&paths.db_file)?;
+    crate::db::load_project(&conn, project_id)?.ok_or_else(|| "Project not found".to_string())
 }
 
 pub fn create_project(

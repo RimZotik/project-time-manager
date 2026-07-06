@@ -1,7 +1,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-// TODO(phase2): убрать allow, когда db станет основным хранилищем
-#[allow(dead_code)]
 mod db;
 mod export;
 mod models;
@@ -667,6 +665,7 @@ fn apply_sample(
 fn main() {
     let paths = storage_paths().expect("failed to resolve storage paths");
     ensure_storage(&paths).expect("failed to create storage");
+    migrate_legacy_if_needed(&paths).expect("failed to migrate legacy data");
     let store = load_store(&paths).expect("failed to load store");
     let _ = set_autostart_enabled(store.workspace.autostart);
     let tracker = TrackerRuntime {
