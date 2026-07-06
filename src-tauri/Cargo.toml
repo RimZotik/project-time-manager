@@ -1,0 +1,32 @@
+[package]
+name = "project-time-manager"
+version = "0.1.17"
+edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+printpdf = "0.9.1"
+rust_xlsxwriter = "0.81"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+uuid = { version = "1", features = ["v4", "serde"] }
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging"
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
