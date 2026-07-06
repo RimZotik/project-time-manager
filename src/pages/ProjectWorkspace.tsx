@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
+import ProjectTimeline from "../components/ProjectTimeline";
 
 type TrackerStatus = "stopped" | "paused" | "running";
 
@@ -1998,9 +1999,11 @@ export default function ProjectWorkspace() {
                   )}
 
                   {activeTab === "reports" && (
-                    <section className="grid flex-1 place-items-center rounded-[24px] border border-dashed border-emerald-200 bg-white/60 p-8 text-center text-sm text-slate-500">
-                      {t.reportsSoon}
-                    </section>
+                    <ProjectTimeline
+                      sessions={selectedProject.sessions}
+                      stages={selectedProject.stages}
+                      language={language}
+                    />
                   )}
                 </div>
               </>
