@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Settings,
   Square,
+  Tags,
   TimerReset,
   Trash2,
   X,
@@ -40,11 +41,23 @@ type AppSettings = {
   language: "ru" | "en";
 };
 
+type Category = {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 type ProjectSummary = {
   id: string;
   name: string;
   client: string;
   updated_at: string;
+  category_id?: string | null;
+  color?: string | null;
 };
 
 type TabUsageRecord = {
@@ -126,6 +139,8 @@ type ProjectRecord = ProjectSummary & {
   apps: AppUsageRecord[];
   selected_stage_ids: string[];
   stages: ProjectStageRecord[];
+  category_id?: string | null;
+  color?: string | null;
 };
 
 type AppState = {
@@ -133,6 +148,7 @@ type AppState = {
   settings: AppSettings;
   projects: ProjectSummary[];
   selected_project: ProjectRecord | null;
+  categories: Category[];
 };
 
 type ExportResult = {
@@ -189,6 +205,7 @@ const fallbackState: AppState = {
   },
   projects: [],
   selected_project: null,
+  categories: [],
 };
 
 const copy = {
@@ -211,6 +228,17 @@ const copy = {
     importJsonLabel: "Импорт JSON",
     exportExcelLabel: "Экспорт Excel",
     exportPdfLabel: "PDF",
+    categoryLabel: "Категория",
+    noCategory: "Без категории",
+    manageCategoriesLabel: "Категории",
+    categoriesTitle: "Категории проектов",
+    categoriesDescription:
+      "Создавайте категории (например, Монтаж, Программирование) и присваивайте их проектам, чтобы сравнивать аналитику.",
+    categoryNamePlaceholder: "Название категории",
+    addCategoryLabel: "Добавить",
+    categoryEmpty: "Категорий пока нет.",
+    deleteCategoryConfirm:
+      "Удалить категорию? Проекты этой категории останутся без категории.",
     totalProjectLabel: "Всего по проекту",
     sessionsCountLabel: "Сеансов",
     topAppLabel: "Топ приложение",
@@ -319,6 +347,17 @@ const copy = {
     importJsonLabel: "Import JSON",
     exportExcelLabel: "Export Excel",
     exportPdfLabel: "PDF",
+    categoryLabel: "Category",
+    noCategory: "No category",
+    manageCategoriesLabel: "Categories",
+    categoriesTitle: "Project categories",
+    categoriesDescription:
+      "Create categories (e.g. Editing, Programming) and assign them to projects to compare analytics.",
+    categoryNamePlaceholder: "Category name",
+    addCategoryLabel: "Add",
+    categoryEmpty: "No categories yet.",
+    deleteCategoryConfirm:
+      "Delete this category? Its projects will simply have no category.",
     totalProjectLabel: "Total project",
     sessionsCountLabel: "Sessions",
     topAppLabel: "Top app",
@@ -794,6 +833,7 @@ export default function ProjectWorkspace() {
   const [linkMenu, setLinkMenu] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
   const [renameProject, setRenameProject] = useState<RenameState | null>(null);
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [modal, setModal] = useState<"settings" | "help" | "stages" | null>(
     null,
   );
@@ -822,10 +862,6 @@ export default function ProjectWorkspace() {
 
   useEffect(() => {
     refresh();
-    if (window.localStorage.getItem("project-time-manager-help-seen") !== "1") {
-      setModal("help");
-      window.localStorage.setItem("project-time-manager-help-seen", "1");
-    }
     const timer = window.setInterval(refresh, 1500);
     return () => window.clearInterval(timer);
   }, []);
@@ -911,6 +947,43 @@ export default function ProjectWorkspace() {
 
   async function selectProject(projectId: string) {
     await invokeCommand<void>("select_project", { projectId }, undefined);
+    refresh();
+  }
+
+  async function assignCategory(projectId: string, categoryId: string | null) {
+    await invokeCommand<ProjectRecord | null>(
+      "set_project_category",
+      { projectId, categoryId },
+      null,
+    );
+    refresh();
+  }
+
+  async function createCategory(name: string, color: string, icon: string) {
+    await invokeCommand<Category | null>(
+      "create_category",
+      { name, color, icon },
+      null,
+    );
+    refresh();
+  }
+
+  async function updateCategory(
+    id: string,
+    name: string,
+    color: string,
+    icon: string,
+  ) {
+    await invokeCommand<void>(
+      "update_category",
+      { id, name, color, icon },
+      undefined,
+    );
+    refresh();
+  }
+
+  async function deleteCategory(id: string) {
+    await invokeCommand<void>("delete_category", { id }, undefined);
     refresh();
   }
 
@@ -1120,33 +1193,6 @@ export default function ProjectWorkspace() {
     setEditingTimeKey(null);
   }
 
-  async function exportXlsx() {
-    if (isRecordingLocked) return;
-    const result = await invokeCommand<ExportResult | null>(
-      "export_selected_project_xlsx",
-      {},
-      null,
-    );
-    setToast({
-      text: result?.message ?? t.exportDone,
-      exportPath: result?.path,
-    });
-    refresh();
-  }
-
-  async function exportPdf() {
-    if (isRecordingLocked) return;
-    const result = await invokeCommand<ExportResult | null>(
-      "export_selected_project_pdf",
-      {},
-      null,
-    );
-    setToast({
-      text: result?.message ?? t.exportDone,
-      exportPath: result?.path,
-    });
-    refresh();
-  }
 
   async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
     if (isRecordingLocked) return;
@@ -1279,6 +1325,23 @@ export default function ProjectWorkspace() {
                   <FolderPlus size={16} />
                   {t.createLabel}
                 </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="secondary-button min-h-10 px-3"
+                    onClick={() => importInputRef.current?.click()}
+                    disabled={isStageEditingLocked}
+                  >
+                    <Import size={16} />
+                    {t.importJsonLabel}
+                  </button>
+                  <button
+                    className="secondary-button min-h-10 px-3"
+                    onClick={() => setCategoryManagerOpen(true)}
+                  >
+                    <Tags size={16} />
+                    {t.manageCategoriesLabel}
+                  </button>
+                </div>
               </div>
 
               <div className="stable-scroll mt-4 min-h-0 flex-1 overflow-y-scroll pr-1">
@@ -1294,14 +1357,30 @@ export default function ProjectWorkspace() {
                           }`}
                         >
                           <button
-                            className="min-w-0 flex-1 text-left"
+                            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                             onClick={() => selectProject(project.id)}
                           >
-                            <strong className="block truncate text-sm text-slate-900">
-                              {project.name}
-                            </strong>
-                            <span className="block truncate text-xs text-slate-500">
-                              {formatDateTime(project.updated_at, language)}
+                            <span
+                              className="size-2.5 shrink-0 rounded-full"
+                              style={{
+                                background:
+                                  state.categories.find(
+                                    (c) => c.id === project.category_id,
+                                  )?.color ?? "#d1d5db",
+                              }}
+                              title={
+                                state.categories.find(
+                                  (c) => c.id === project.category_id,
+                                )?.name ?? t.noCategory
+                              }
+                            />
+                            <span className="min-w-0 flex-1">
+                              <strong className="block truncate text-sm text-slate-900">
+                                {project.name}
+                              </strong>
+                              <span className="block truncate text-xs text-slate-500">
+                                {formatDateTime(project.updated_at, language)}
+                              </span>
                             </span>
                           </button>
                           <button
@@ -1364,24 +1443,6 @@ export default function ProjectWorkspace() {
               </div>
             </section>
 
-            <section className="shrink-0 rounded-[24px] border border-emerald-100 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  className="secondary-button min-h-10 px-3"
-                  onClick={() => setModal("settings")}
-                >
-                  <Settings size={16} />
-                  {t.settingsLabel}
-                </button>
-                <button
-                  className="secondary-button min-h-10 px-3"
-                  onClick={() => setModal("help")}
-                >
-                  <CircleAlert size={16} />
-                  {t.helpLabel}
-                </button>
-              </div>
-            </section>
           </aside>
 
           <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden">
@@ -1429,31 +1490,41 @@ export default function ProjectWorkspace() {
                   </button>
                 </div>
 
-                <div className="flex flex-nowrap gap-2">
-                  <button
-                    className="secondary-button"
-                    onClick={() => importInputRef.current?.click()}
-                    disabled={isStageEditingLocked}
-                  >
-                    <Import size={16} />
-                    {t.importJsonLabel}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={exportXlsx}
-                    disabled={isStageEditingLocked}
-                  >
-                    <Download size={16} />
-                    {t.exportExcelLabel}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={exportPdf}
-                    disabled={isStageEditingLocked}
-                  >
-                    <FileText size={16} />
-                    {t.exportPdfLabel}
-                  </button>
+                <div className="flex items-center justify-end">
+                  {selectedProject && (
+                    <label
+                      className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                      title={t.categoryLabel}
+                    >
+                      <span
+                        className="size-3 shrink-0 rounded-full"
+                        style={{
+                          background:
+                            state.categories.find(
+                              (c) => c.id === selectedProject.category_id,
+                            )?.color ?? "#cbd5e1",
+                        }}
+                      />
+                      <select
+                        className="max-w-[180px] bg-transparent text-sm font-medium text-slate-700 outline-none"
+                        value={selectedProject.category_id ?? ""}
+                        onChange={(event) =>
+                          assignCategory(
+                            selectedProject.id,
+                            event.target.value || null,
+                          )
+                        }
+                      >
+                        <option value="">{t.noCategory}</option>
+                        {state.categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.icon ? `${category.icon} ` : ""}
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -1859,6 +1930,16 @@ export default function ProjectWorkspace() {
           onClose={() => setModal(null)}
           onSettingsChange={updateSettings}
           onOpenAppFolder={openAppFolder}
+        />
+      ) : null}
+      {categoryManagerOpen ? (
+        <CategoryManagerModal
+          categories={state.categories}
+          language={language}
+          onClose={() => setCategoryManagerOpen(false)}
+          onCreate={createCategory}
+          onUpdate={updateCategory}
+          onDelete={deleteCategory}
         />
       ) : null}
       {projectMenu ? (
@@ -2397,6 +2478,152 @@ function RenameProjectModal({
             <Check size={16} />
             {t.saveLabel}
           </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const CATEGORY_PALETTE = [
+  "#059669",
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#0891b2",
+  "#65a30d",
+  "#dc2626",
+];
+
+function CategoryManagerModal({
+  categories,
+  language,
+  onClose,
+  onCreate,
+  onUpdate,
+  onDelete,
+}: {
+  categories: Category[];
+  language: "ru" | "en";
+  onClose: () => void;
+  onCreate: (name: string, color: string, icon: string) => void;
+  onUpdate: (id: string, name: string, color: string, icon: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const t = copy[language];
+  const [name, setName] = useState("");
+  const [icon, setIcon] = useState("");
+  const [color, setColor] = useState(CATEGORY_PALETTE[0]);
+
+  function submit() {
+    if (!name.trim()) return;
+    onCreate(name.trim(), color, icon.trim());
+    setName("");
+    setIcon("");
+    setColor(CATEGORY_PALETTE[0]);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-900/30 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <section
+        className="w-full max-w-lg overflow-hidden rounded-[28px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.22)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-emerald-100 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {t.categoriesTitle}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {t.categoriesDescription}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="space-y-4 p-6">
+          {/* Добавление */}
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={color}
+              onChange={(event) => setColor(event.target.value)}
+              className="size-10 shrink-0 cursor-pointer rounded-xl border border-slate-200 bg-white p-1"
+              title={t.categoryLabel}
+            />
+            <input
+              className="field"
+              value={name}
+              placeholder={t.categoryNamePlaceholder}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && submit()}
+            />
+            <input
+              className="field w-16 text-center"
+              value={icon}
+              placeholder="🎬"
+              maxLength={2}
+              onChange={(event) => setIcon(event.target.value)}
+            />
+            <button
+              className="primary-button shrink-0"
+              onClick={submit}
+              disabled={!name.trim()}
+            >
+              <Plus size={16} />
+              {t.addCategoryLabel}
+            </button>
+          </div>
+
+          {/* Список */}
+          <div className="max-h-[45vh] space-y-2 overflow-y-auto">
+            {categories.length ? (
+              categories.map((category) => (
+                <div
+                  key={category.id}
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 px-3 py-2.5"
+                >
+                  <input
+                    type="color"
+                    value={category.color}
+                    onChange={(event) =>
+                      onUpdate(
+                        category.id,
+                        category.name,
+                        event.target.value,
+                        category.icon,
+                      )
+                    }
+                    className="size-8 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                    {category.icon ? `${category.icon} ` : ""}
+                    {category.name}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(t.deleteCategoryConfirm)) {
+                        onDelete(category.id);
+                      }
+                    }}
+                    className="grid size-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <EmptyState text={t.categoryEmpty} />
+            )}
+          </div>
         </div>
       </section>
     </div>

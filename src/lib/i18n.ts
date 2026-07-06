@@ -19,6 +19,44 @@ export const shellCopy = {
     expand: "Развернуть меню",
     soon: "Скоро",
     inDevelopment: "Раздел в разработке",
+    recording: "Идёт запись",
+    notRecording: "Запись не идёт",
+    noProject: "Проект не выбран",
+    helpButton: "Помощь",
+    help: {
+      title: "Как пользоваться",
+      subtitle: "Основные действия: проекты, запись времени, категории и отчёты.",
+      items: [
+        {
+          title: "Проекты и категории",
+          text: "Создайте проект или импортируйте JSON в разделе «Проекты». Присвойте проекту категорию (например, Монтаж или Программирование), чтобы сравнивать по ней аналитику.",
+        },
+        {
+          title: "Запись времени",
+          text: "Выберите проект и нажмите «Старт». Приложение считает активные окна, приложения и сайты. Ставьте на паузу или стоп. Индикатор записи виден в правом верхнем углу.",
+        },
+        {
+          title: "Этапы",
+          text: "Заведите этапы проекта и выбирайте их перед стартом сессии — так время распределяется по этапам, а в отчёте виден таймлайн.",
+        },
+        {
+          title: "Включение и исключение",
+          text: "Снимайте галочки у приложений, сайтов или ссылок, которые не должны попадать в итог — данные не удаляются, просто не учитываются.",
+        },
+      ],
+    },
+    settings: {
+      title: "Настройки",
+      subtitle: "Системные параметры приложения",
+      language: "Язык интерфейса",
+      languageRu: "Русский",
+      languageEn: "English",
+      autostart: "Автозапуск с Windows",
+      autostartHint: "Запускать приложение при входе в систему",
+      dataFolder: "Папка данных",
+      dataFolderHint: "Все проекты и база хранятся рядом с приложением",
+      openFolder: "Открыть папку",
+    },
     pages: {
       dashboard: {
         title: "Дашборд",
@@ -61,6 +99,44 @@ export const shellCopy = {
     expand: "Expand menu",
     soon: "Soon",
     inDevelopment: "Section in development",
+    recording: "Recording",
+    notRecording: "Not recording",
+    noProject: "No project selected",
+    helpButton: "Help",
+    help: {
+      title: "How to use",
+      subtitle: "Core actions: projects, time tracking, categories and reports.",
+      items: [
+        {
+          title: "Projects and categories",
+          text: "Create a project or import JSON on the Projects page. Assign a category (e.g. Editing or Programming) to compare analytics by it.",
+        },
+        {
+          title: "Time tracking",
+          text: "Pick a project and press Start. The app tracks active windows, apps and sites. Pause or stop anytime. The recording indicator sits in the top-right corner.",
+        },
+        {
+          title: "Stages",
+          text: "Create project stages and pick them before starting a session, so time is split across stages and the report shows a timeline.",
+        },
+        {
+          title: "Include and exclude",
+          text: "Uncheck apps, sites or links that should not count toward totals — the data is kept, just not counted.",
+        },
+      ],
+    },
+    settings: {
+      title: "Settings",
+      subtitle: "System-level app preferences",
+      language: "Interface language",
+      languageRu: "Русский",
+      languageEn: "English",
+      autostart: "Launch on Windows startup",
+      autostartHint: "Start the app when you sign in",
+      dataFolder: "Data folder",
+      dataFolderHint: "All projects and the database live next to the app",
+      openFolder: "Open folder",
+    },
     pages: {
       dashboard: {
         title: "Dashboard",

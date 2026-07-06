@@ -160,7 +160,7 @@ pub fn init_schema(conn: &Connection) -> Result<(), String> {
 /// Открыть базу и гарантировать схему + прагмы (foreign_keys, WAL).
 pub fn connect(db_path: &std::path::Path) -> Result<Connection, String> {
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-    conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+    init_schema(&conn)?;
     Ok(conn)
 }
 

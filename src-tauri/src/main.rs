@@ -1,15 +1,11 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod db;
-mod export;
 mod models;
-mod pdf;
 mod storage;
 mod windows;
 
-use crate::export::export_project_xlsx;
 use crate::models::*;
-use crate::pdf::export_project_pdf;
 use crate::storage::*;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -458,51 +454,12 @@ fn import_project_json(
 }
 
 #[tauri::command]
-fn export_selected_project_xlsx(state: State<'_, AppRuntime>) -> Result<ExportResult, String> {
-    ensure_tracker_stopped(&state)?;
-    let store = state.store.lock().map_err(|err| err.to_string())?.clone();
-    let project =
-        selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
-    let path = reserve_report_path(&project_report_path(&state.paths, &project));
-    export_project_xlsx(&project, path.clone())?;
-    Ok(ExportResult {
-        message: format!("Excel-отчет сохранен: {}", path.display()),
-        path: path.to_string_lossy().to_string(),
-    })
-}
-
-#[tauri::command]
-fn export_selected_project_pdf(state: State<'_, AppRuntime>) -> Result<ExportResult, String> {
-    ensure_tracker_stopped(&state)?;
-    let store = state.store.lock().map_err(|err| err.to_string())?.clone();
-    let project =
-        selected_project_from_store(&store).ok_or_else(|| "No project selected".to_string())?;
-    let path = reserve_report_path(&project_report_pdf_path(&state.paths, &project));
-    export_project_pdf(&project, path.clone())?;
-    Ok(ExportResult {
-        message: format!("PDF-отчет сохранен: {}", path.display()),
-        path: path.to_string_lossy().to_string(),
-    })
-}
-
-#[tauri::command]
-fn open_report_file(path: String) -> Result<(), String> {
-    open_path(&path)
-}
-
-#[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let trimmed = url.trim();
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
         return Err("URL недоступен.".to_string());
     }
     open_path(trimmed)
-}
-
-#[derive(serde::Serialize)]
-struct ExportResult {
-    message: String,
-    path: String,
 }
 
 fn selected_project_from_store(store: &StoreData) -> Option<ProjectRecord> {
@@ -770,9 +727,6 @@ fn main() {
             delete_category,
             set_project_category,
             import_project_json,
-            export_selected_project_xlsx,
-            export_selected_project_pdf,
-            open_report_file,
             open_external_url,
             open_app_folder
         ])
