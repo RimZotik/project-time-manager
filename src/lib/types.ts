@@ -126,6 +126,14 @@ export type SessionLite = {
 
 export type AppTotal = { name: string; kind: string; seconds: number };
 
+export type ActiveWindowInfo = {
+  name: string;
+  process_name: string;
+  title: string;
+  url?: string | null;
+  kind: string;
+};
+
 export type AnalyticsPayload = {
   projects: ProjectAnalytics[];
   sessions: SessionLite[];

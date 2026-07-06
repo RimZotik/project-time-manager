@@ -74,6 +74,25 @@ fn list_categories(state: State<'_, AppRuntime>) -> Result<Vec<Category>, String
 }
 
 #[tauri::command]
+fn get_active_window() -> Option<ActiveWindowInfo> {
+    windows::capture_active_window().map(|o| ActiveWindowInfo {
+        name: friendly_app_name(&o.process_name, &o.process_path, o.browser_name.as_deref()),
+        process_name: o.process_name.clone(),
+        title: o
+            .tab_title
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(o.window_title),
+        url: o.url,
+        kind: if o.browser_name.is_some() {
+            "browser".to_string()
+        } else {
+            "app".to_string()
+        },
+    })
+}
+
+#[tauri::command]
 fn get_analytics(state: State<'_, AppRuntime>) -> Result<AnalyticsPayload, String> {
     let conn = crate::db::connect(&state.paths.db_file)?;
     crate::db::analytics(&conn)
@@ -729,6 +748,7 @@ fn main() {
             update_app_settings,
             list_categories,
             get_analytics,
+            get_active_window,
             create_category,
             update_category,
             delete_category,

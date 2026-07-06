@@ -42,6 +42,16 @@ pub struct AppTotal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ActiveWindowInfo {
+    pub name: String,
+    pub process_name: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Category {
     pub id: String,
     pub name: String,
