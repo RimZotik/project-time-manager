@@ -8,6 +8,7 @@ import {
   useState,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ProjectStageRecord, SessionRecord } from "../lib/types";
 
 type Lang = "ru" | "en";
@@ -109,6 +110,11 @@ export default function ProjectTimeline({
   const [fitPx, setFitPx] = useState<number>(0);
   const pendingScroll = useRef<number | null>(null);
   const drag = useRef<{ x: number; scroll: number } | null>(null);
+  const [hover, setHover] = useState<{
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const segs = useMemo<Seg[]>(() => {
     return sessions
@@ -242,8 +248,12 @@ export default function ProjectTimeline({
           </span>
           <button
             onClick={() => {
-              pendingScroll.current = 0;
-              setPxPerMs(fitPx);
+              if (!wrapRef.current || !totalMs) return;
+              const w = wrapRef.current.clientWidth - 16;
+              const fit = w / totalMs;
+              setFitPx(fit);
+              setPxPerMs(fit);
+              wrapRef.current.scrollLeft = 0;
             }}
             className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:border-emerald-200 hover:text-emerald-700"
           >
@@ -342,7 +352,15 @@ export default function ProjectTimeline({
                   return (
                     <div
                       key={seg.id}
-                      title={tip}
+                      onMouseEnter={(e) =>
+                        setHover({ text: tip, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseMove={(e) =>
+                        setHover((h) =>
+                          h ? { ...h, x: e.clientX, y: e.clientY } : h,
+                        )
+                      }
+                      onMouseLeave={() => setHover(null)}
                       className="absolute top-1.5 rounded-md shadow-sm transition-[filter] hover:brightness-95"
                       style={{
                         left,
@@ -358,6 +376,17 @@ export default function ProjectTimeline({
           </div>
         </div>
       </div>
+
+      {hover &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[70] max-w-xs whitespace-pre-line rounded-xl border border-emerald-100 bg-white/95 px-3 py-2 text-xs leading-relaxed text-slate-700 shadow-[0_12px_40px_rgba(15,23,42,0.18)] backdrop-blur"
+            style={{ left: hover.x + 14, top: hover.y + 14 }}
+          >
+            {hover.text}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

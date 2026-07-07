@@ -34,10 +34,18 @@ export default function AnalyticsPage() {
   async function load() {
     setData(await invokeCommand<AnalyticsPayload>("get_analytics", {}, EMPTY));
   }
+  // Рефетч при любом изменении проектов/категорий (смена категории, рост
+  // времени во время записи) — данные обновляются реактивно.
+  const sig =
+    state.projects
+      .map((p) => `${p.id}:${p.category_id ?? ""}:${p.updated_at}`)
+      .join("|") +
+    "#" +
+    state.categories.map((c) => `${c.id}:${c.color}:${c.name}`).join(",");
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sig]);
 
   const L =
     lang === "en"

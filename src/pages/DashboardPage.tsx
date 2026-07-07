@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CirclePlay, FolderKanban } from "lucide-react";
+import { CirclePause, CirclePlay, FolderKanban, Square } from "lucide-react";
 import { useAppState } from "../store/AppState";
 import { shellCopy } from "../lib/i18n";
 import { invokeCommand } from "../lib/api";
@@ -39,9 +39,16 @@ export default function DashboardPage() {
   const [data, setData] = useState<AnalyticsPayload>(EMPTY);
   const [now, setNow] = useState(Date.now());
 
+  const sig =
+    state.projects
+      .map((p) => `${p.id}:${p.category_id ?? ""}:${p.updated_at}`)
+      .join("|") +
+    "#" +
+    state.categories.map((c) => `${c.id}:${c.color}`).join(",");
   useEffect(() => {
     invokeCommand<AnalyticsPayload>("get_analytics", {}, EMPTY).then(setData);
-  }, [state.projects.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -53,29 +60,35 @@ export default function DashboardPage() {
       ? {
           recording: "Recording now",
           idle: "Not recording",
-          idleHint: "Pick a project below to start tracking.",
+          idleHint: "Choose a project and press Start.",
           totalTime: "Total time",
           projects: "Projects",
           sessions: "Sessions",
           avgSession: "Avg. session",
           topProjects: "Top projects",
           week: "This week",
-          quickStart: "Quick start",
+          chooseProject: "Project to track",
           start: "Start",
+          pause: "Pause",
+          continue: "Continue",
+          stop: "Stop",
           noProjects: "No projects yet.",
         }
       : {
           recording: "Идёт запись",
           idle: "Запись не идёт",
-          idleHint: "Выбери проект ниже, чтобы начать учёт.",
+          idleHint: "Выберите проект и нажмите «Старт».",
           totalTime: "Всего времени",
           projects: "Проектов",
           sessions: "Сессий",
           avgSession: "Средняя сессия",
           topProjects: "Топ проекты",
           week: "За неделю",
-          quickStart: "Быстрый старт",
+          chooseProject: "Проект для записи",
           start: "Старт",
+          pause: "Пауза",
+          continue: "Продолжить",
+          stop: "Стоп",
           noProjects: "Проектов пока нет.",
         };
 
@@ -118,22 +131,32 @@ export default function DashboardPage() {
   }, [data.sessions]);
   const weekMax = Math.max(1, ...week.map((d) => d.seconds));
 
-  const recording = state.tracker.status === "running";
+  const status = state.tracker.status;
+  const recording = status === "running";
+  const paused = status === "paused";
+  const busy = recording || paused;
+  const selectedId = state.selected_project?.id ?? null;
+  const selectedName = state.selected_project?.name ?? null;
   const activeName =
     state.projects.find((p) => p.id === state.tracker.active_project_id)?.name ??
-    null;
+    selectedName;
   const runSince = state.tracker.running_since
     ? parseTs(state.tracker.running_since)
     : null;
-  const elapsed = recording && runSince ? now - runSince : 0;
+  const elapsed = busy && runSince ? now - runSince : 0;
 
-  const recentProjects = [...state.projects]
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .slice(0, 6);
+  const recentProjects = [...state.projects].sort((a, b) =>
+    b.updated_at.localeCompare(a.updated_at),
+  );
 
-  async function quickStart(projectId: string) {
+  async function chooseProject(projectId: string) {
     await invokeCommand<void>("select_project", { projectId }, undefined);
-    await invokeCommand<void>("start_tracking", {}, undefined);
+    refresh();
+  }
+  async function track(
+    cmd: "start_tracking" | "pause_tracking" | "stop_tracking",
+  ) {
+    await invokeCommand<void>(cmd, {}, undefined);
     refresh();
   }
 
@@ -142,9 +165,9 @@ export default function DashboardPage() {
       <PageHeader title={t.title} subtitle={t.subtitle} />
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
         <div className="mx-auto flex max-w-5xl flex-col gap-5">
-          {/* Статус записи */}
+          {/* Центр управления записью */}
           <section
-            className={`flex items-center gap-4 rounded-[24px] border p-6 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${
+            className={`flex flex-wrap items-center gap-4 rounded-[24px] border p-6 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${
               recording
                 ? "border-emerald-200 bg-emerald-50/70"
                 : "border-slate-200 bg-white/80"
@@ -166,10 +189,10 @@ export default function DashboardPage() {
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-slate-900">
-                {recording ? L.recording : L.idle}
+                {recording ? L.recording : paused ? L.pause : L.idle}
               </p>
               <p className="truncate text-sm text-slate-500">
-                {recording ? activeName : L.idleHint}
+                {busy ? activeName : (selectedName ?? L.idleHint)}
               </p>
             </div>
             {recording && (
@@ -177,6 +200,45 @@ export default function DashboardPage() {
                 {fmtClock(elapsed)}
               </span>
             )}
+            <div className="flex items-center gap-2">
+              {!busy && (
+                <button
+                  onClick={() => track("start_tracking")}
+                  disabled={!selectedId}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                >
+                  <CirclePlay size={16} />
+                  {L.start}
+                </button>
+              )}
+              {recording && (
+                <button
+                  onClick={() => track("pause_tracking")}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-emerald-200"
+                >
+                  <CirclePause size={16} />
+                  {L.pause}
+                </button>
+              )}
+              {paused && (
+                <button
+                  onClick={() => track("start_tracking")}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                >
+                  <CirclePlay size={16} />
+                  {L.continue}
+                </button>
+              )}
+              {busy && (
+                <button
+                  onClick={() => track("stop_tracking")}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-rose-200 hover:text-rose-600"
+                >
+                  <Square size={16} />
+                  {L.stop}
+                </button>
+              )}
+            </div>
           </section>
 
           {/* KPI */}
@@ -257,36 +319,42 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {/* Быстрый старт */}
+          {/* Выбор проекта для записи */}
           <section className="rounded-[24px] border border-emerald-100 bg-white/80 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
             <h2 className="mb-4 text-sm font-semibold text-slate-900">
-              {L.quickStart}
+              {L.chooseProject}
             </h2>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {recentProjects.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => quickStart(p.id)}
-                  disabled={recording}
-                  className="group flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span
-                    className="grid size-8 shrink-0 place-items-center rounded-xl text-emerald-600"
-                    style={{
-                      background:
-                        state.categories.find((c) => c.id === p.category_id)
-                          ?.color ?? "#ecfdf5",
-                    }}
+              {recentProjects.map((p) => {
+                const active = p.id === selectedId;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => chooseProject(p.id)}
+                    disabled={busy}
+                    className={`flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      active
+                        ? "border-emerald-300 bg-emerald-50"
+                        : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50"
+                    }`}
                   >
-                    <CirclePlay size={16} className="text-white" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-800">
+                    <span
+                      className="size-3 shrink-0 rounded-full"
+                      style={{
+                        background:
+                          state.categories.find((c) => c.id === p.category_id)
+                            ?.color ?? "#cbd5e1",
+                      }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
                       {p.name}
                     </span>
-                  </span>
-                </button>
-              ))}
+                    {active && (
+                      <CirclePlay size={15} className="shrink-0 text-emerald-600" />
+                    )}
+                  </button>
+                );
+              })}
               {!recentProjects.length && (
                 <div className="col-span-full flex items-center gap-2 text-sm text-slate-400">
                   <FolderKanban size={16} />

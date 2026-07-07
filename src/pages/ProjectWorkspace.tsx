@@ -27,6 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
 import ProjectTimeline from "../components/ProjectTimeline";
@@ -223,6 +224,8 @@ const copy = {
     projectSettingsLabel: "Настройки проекта",
     reportsLabel: "Отчёты",
     reportsSoon: "Таймлайн проекта и отчёты появятся здесь.",
+    appsCountLabel: "Приложений и окон",
+    tabsCountLabel: "Сайтов и вкладок",
     deleteProjectLabel: "Удалить проект",
     suggestCategoryLabel: "Определить по приложениям",
     createLabel: "Создать",
@@ -261,7 +264,7 @@ const copy = {
     noSessions: "Сеансы появятся после старта записи.",
     emptyPrompt: "Выбери или создай проект, чтобы начать запись.",
     currentProjectHint:
-      "Выбери проект, запусти запись и отслеживай активные окна.",
+      "Настрой проект, этапы и категорию. Управление записью — на Дашборде.",
     projectCreated: "Проект создан.",
     exportDone: "Экспорт выполнен.",
     importDone: "Импорт выполнен.",
@@ -348,6 +351,8 @@ const copy = {
     projectSettingsLabel: "Project settings",
     reportsLabel: "Reports",
     reportsSoon: "The project timeline and reports will live here.",
+    appsCountLabel: "Apps & windows",
+    tabsCountLabel: "Sites & tabs",
     deleteProjectLabel: "Delete project",
     suggestCategoryLabel: "Detect from apps",
     createLabel: "Create",
@@ -386,7 +391,7 @@ const copy = {
     noSessions: "Sessions will appear after recording starts.",
     emptyPrompt: "Choose or create a project to start recording.",
     currentProjectHint:
-      "Choose a project, start recording, and track active windows.",
+      "Set up the project, stages and category. Recording is controlled on the Dashboard.",
     projectCreated: "Project created.",
     exportDone: "Export completed.",
     importDone: "Import completed.",
@@ -1519,7 +1524,7 @@ export default function ProjectWorkspace() {
 
           <section className="flex min-h-0 flex-col gap-4 overflow-hidden">
             <section className="shrink-0 rounded-[24px] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="grid grid-cols-[minmax(420px,1fr)_auto_auto] items-center gap-4">
+              <div className="grid grid-cols-[minmax(320px,1fr)_auto] items-center gap-4">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl font-semibold text-slate-900">
@@ -1533,33 +1538,6 @@ export default function ProjectWorkspace() {
                   <p className="whitespace-nowrap text-sm text-slate-500">
                     {t.currentProjectHint}
                   </p>
-                </div>
-
-                <div className="flex flex-nowrap gap-2">
-                  <button
-                    className="primary-button"
-                    onClick={() => toggleTracking("start_tracking")}
-                    disabled={isRunning || !selectedProject}
-                  >
-                    <CirclePlay size={16} />
-                    {isPaused ? t.continueLabel : t.startLabel}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => toggleTracking("pause_tracking")}
-                    disabled={!isRunning || !selectedProject}
-                  >
-                    <CirclePause size={16} />
-                    {t.pauseLabel}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => toggleTracking("stop_tracking")}
-                    disabled={(!isRunning && !isPaused) || !selectedProject}
-                  >
-                    <Square size={16} />
-                    {t.stopLabel}
-                  </button>
                 </div>
 
                 <div className="flex items-center justify-end">
@@ -2012,11 +1990,37 @@ export default function ProjectWorkspace() {
                   )}
 
                   {activeTab === "reports" && (
-                    <ProjectTimeline
-                      sessions={selectedProject.sessions}
-                      stages={selectedProject.stages}
-                      language={language}
-                    />
+                    <div className="flex min-h-0 flex-1 flex-col gap-4">
+                      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <Metric
+                          label={t.sessionsCountLabel}
+                          value={String(sessions.length)}
+                          accent="emerald"
+                        />
+                        <Metric
+                          label={t.appsCountLabel}
+                          value={String(apps.length)}
+                          accent="emerald"
+                        />
+                        <Metric
+                          label={t.tabsCountLabel}
+                          value={String(
+                            apps.reduce((sum, app) => sum + app.tabs.length, 0),
+                          )}
+                          accent="emerald"
+                        />
+                        <Metric
+                          label={t.totalProjectLabel}
+                          value={formatDuration(totals.appTime, language)}
+                          accent="emerald"
+                        />
+                      </section>
+                      <ProjectTimeline
+                        sessions={selectedProject.sessions}
+                        stages={selectedProject.stages}
+                        language={language}
+                      />
+                    </div>
                   )}
                 </div>
               </>
@@ -2917,13 +2921,29 @@ function CategoryPicker({
 }) {
   const t = copy[language];
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number }>();
+  const btnRef = useRef<HTMLButtonElement>(null);
   const current = categories.find((c) => c.id === value) ?? null;
 
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const width = Math.max(r.width, 240);
+      setPos({
+        left: Math.min(r.left, window.innerWidth - width - 12),
+        top: r.bottom + 6,
+        width,
+      });
+    }
+    setOpen((v) => !v);
+  }
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex min-w-[180px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-emerald-200"
       >
         <span
@@ -2931,7 +2951,9 @@ function CategoryPicker({
           style={{ background: current?.color ?? "#cbd5e1" }}
         />
         <span className="min-w-0 flex-1 truncate text-left">
-          {current ? `${current.icon ? `${current.icon} ` : ""}${current.name}` : t.noCategory}
+          {current
+            ? `${current.icon ? `${current.icon} ` : ""}${current.name}`
+            : t.noCategory}
         </span>
         <ChevronDown
           size={16}
@@ -2939,54 +2961,58 @@ function CategoryPicker({
         />
       </button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.14 }}
-            className="absolute right-0 z-50 mt-2 max-h-72 w-64 overflow-y-auto rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
-          >
-            <button
-              onClick={() => {
-                onChange(null);
-                setOpen(false);
-              }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-emerald-50"
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.14 }}
+              style={{ left: pos.left, top: pos.top, width: pos.width }}
+              className="fixed z-[61] max-h-72 overflow-y-auto rounded-2xl border border-emerald-100 bg-white p-2 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
             >
-              <span className="size-3 shrink-0 rounded-full border-2 border-slate-300" />
-              <span className="min-w-0 flex-1 truncate text-slate-600">
-                {t.noCategory}
-              </span>
-              {value === null && <Check size={15} className="text-emerald-600" />}
-            </button>
-            {categories.map((category) => (
               <button
-                key={category.id}
                 onClick={() => {
-                  onChange(category.id);
+                  onChange(null);
                   setOpen(false);
                 }}
                 className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-emerald-50"
               >
-                <span
-                  className="size-3 shrink-0 rounded-full"
-                  style={{ background: category.color }}
-                />
-                <span className="min-w-0 flex-1 truncate text-slate-700">
-                  {category.icon ? `${category.icon} ` : ""}
-                  {category.name}
+                <span className="size-3 shrink-0 rounded-full border-2 border-slate-300" />
+                <span className="min-w-0 flex-1 truncate text-slate-600">
+                  {t.noCategory}
                 </span>
-                {value === category.id && (
-                  <Check size={15} className="text-emerald-600" />
-                )}
+                {value === null && <Check size={15} className="text-emerald-600" />}
               </button>
-            ))}
-          </motion.div>
-        </>
-      )}
-    </div>
+              {categories.map((category) => (
+                <button
+                  key={category.id}
+                  onClick={() => {
+                    onChange(category.id);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-emerald-50"
+                >
+                  <span
+                    className="size-3 shrink-0 rounded-full"
+                    style={{ background: category.color }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-slate-700">
+                    {category.icon ? `${category.icon} ` : ""}
+                    {category.name}
+                  </span>
+                  {value === category.id && (
+                    <Check size={15} className="text-emerald-600" />
+                  )}
+                </button>
+              ))}
+            </motion.div>
+          </>,
+          document.body,
+        )}
+    </>
   );
 }
 

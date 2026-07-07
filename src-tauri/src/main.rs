@@ -481,12 +481,37 @@ fn update_app_settings(
 }
 
 #[tauri::command]
-fn open_app_folder() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
-    let folder = exe
+fn open_app_folder(state: State<'_, AppRuntime>) -> Result<(), String> {
+    let dir = state
+        .paths
+        .db_file
         .parent()
-        .ok_or_else(|| "Application folder not found".to_string())?;
-    open_path(&folder.to_string_lossy())
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "Data folder not found".to_string())?;
+    let _ = std::fs::create_dir_all(&dir);
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&dir)
+            .spawn()
+            .map_err(|err| err.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|err| err.to_string())?;
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

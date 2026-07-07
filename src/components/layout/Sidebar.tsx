@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   MonitorPlay,
   Settings,
-  Tags,
   Timer,
   type LucideIcon,
 } from "lucide-react";
@@ -29,7 +28,6 @@ const NAV: NavItem[] = [
   { to: "/projects", key: "projects", icon: FolderKanban },
   { to: "/analytics", key: "analytics", icon: BarChart3 },
   { to: "/monitoring", key: "monitoring", icon: MonitorPlay },
-  { to: "/categories", key: "categories", icon: Tags },
   { to: "/settings", key: "settings", icon: Settings },
 ];
 
